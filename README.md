@@ -48,11 +48,14 @@ Target operating model for a human-in-the-loop trading workflow where the machin
 - Decide run cadence: daily UK morning (recommended) or weekly
 - Decide rebalance cadence: weekly (recommended to start) or daily (only with strict turnover limits)
 - Decide strategy type: long-only (recommended for eToro manual)
+- Decide instrument constraints: underlying only (no CFDs), no leverage
+- Decide risk-off policy: allow moving partly/fully to cash when conditions are bad (recommended) vs always invested
 - Decide max positions: start with 10–20
 - Decide max position weight: 5–10%
-- Decide kill switch: e.g., pause trading if drawdown > 12%
+- Decide kill switch: e.g., pause trading if drawdown > 20%
 - Decide machine run time (UK): e.g., every weekday 08:00–09:00 UK (ticket ready well before US open)
 - Decide execution window (relative to US open; handle DST shifts): e.g., 5–60 minutes after open
+- Decide distribution policy: reinvest all (recommended) vs periodic distributions (later)
 - **Deliverable:** `config/policy.yml` with these values
 
 ### Project 1 — System setup on Mac Pro Ubuntu
@@ -97,7 +100,7 @@ Target operating model for a human-in-the-loop trading workflow where the machin
 - **Deliverable:** `data/clean/eod.parquet` updated daily + data quality report with hard thresholds (pass/fail) and a “no trade if failed” status
 
 ### Project 3 — Universe: “only things your wife can trade on eToro”
-- Build `config/universe.csv` with: internal_symbol, data_source_symbol (stooq/yahoo), etoro_search_name, exchange/currency, instrument_type (stock/ETF), notes
+- Build `config/universe.csv` with: internal_symbol, data_source_symbol (stooq/yahoo), etoro_search_name, exchange/currency, instrument_type (stock/ETF), tradable_as_underlying (true/false), notes
 - Pick universe size: 50 / 100 / 200; add ETF benchmarks (SPY/QQQ)
 - Wife verifies each symbol is findable/tradable on eToro
 - **Deliverable:** curated `config/universe.csv`
@@ -160,6 +163,8 @@ Target operating model for a human-in-the-loop trading workflow where the machin
 ### Project 11 — Rollout plan (so you don’t blow it up)
 **Phase 0: Pre-flight (1 week)**
 - Confirm eToro execution constraints (fractional shares, minimum order size, order types available, “underlying vs CFD” defaults, base currency/FX fees)
+- UK reality check: which ETFs (if any) are available as underlying (PRIIPs/KID constraints often force ETF CFDs); if ETFs aren’t available, design universe around stocks + cash
+- Confirm US dividend withholding setup (W-8BEN status) so “income mode” assumptions aren’t surprised by taxes
 - Write a 1-page runbook for the human workflow (where to click, what to copy/paste, what “blocked” means)
 - Decide reconciliation method (manual snapshot fields to capture) and set tolerances that will block trading
 - Set the daily schedule: machine run in UK morning; execution at/after US open (DST-aware); confirmation deadline same day
@@ -192,8 +197,9 @@ Target operating model for a human-in-the-loop trading workflow where the machin
 - Positions held: 10 / 20?
 - Base currency in eToro: GBP or USD?
 - Position sizing: £ value (recommended) or units?
+- CFDs/leverage: allowed or banned? (recommended: banned)
 - Execution style: market orders at fixed time vs limit orders with a rule?
 - Reconciliation snapshot: what fields can be captured reliably each run (cash, positions, fees)?
 - Machine run time (UK) and latest acceptable “staleness” for EOD data (e.g., benchmark must have T-1)
 
-_If you don’t answer, defaults will be daily run cadence (UK morning), weekly rebalance, universe=100, positions=15, GBP, £-value sizing._
+_If you don’t answer, defaults will be: daily run cadence (UK morning), weekly rebalance, no CFDs/leverage, universe=100, positions=15, GBP, £-value sizing, reinvest all._
