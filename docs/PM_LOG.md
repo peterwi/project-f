@@ -555,3 +555,14 @@ This file is append-only. Each agent message appends a new entry so the project 
   - `openai_quota_exceeded` (requires a valid key with active quota)
   - `openai_key_exposed_in_command_output_rotate_required` (RD-Agent printed settings including the key; rotate immediately)
   - `requires_escalated_docker_socket_access` (unchanged; not exercised in M9.2)
+
+## 2026-01-02T20:26:10Z
+
+- Milestone / checklist: `M9.2` follow-up evidence capture
+- What changed:
+  - Captured RD-Agent environment metadata into the same run folder:
+    - `/data/trading-ops/artifacts/rd-agent/20260102-201706Z-rd-audit-git8185236/collect_info.txt`
+- Commands executed:
+  - `source /data/trading-ops/venvs/rdagent/bin/activate && rdagent collect_info > .../collect_info.txt 2>&1`
+- Result: PASS (evidence captured)
+  - Why: Confirms RD-Agent is installed and runnable without modifying the repo.
