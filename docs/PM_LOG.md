@@ -249,3 +249,26 @@ This file is append-only. Each agent message appends a new entry so the project 
 - Blockers:
   - Docker socket access still requires escalated execution for this agent session.
   - Data-quality gate will require `--asof-date` overrides on US holidays (by design in v1).
+
+## 2026-01-02T14:50:37Z
+
+- Milestone / checklist: completed `M6.2`; next is `M7.1`
+- What changed:
+  - Updated: `docs/CHECKLIST.md` (marked `M6.2` as DONE)
+  - Updated: `docs/PM_STATE.md` (resume pointer advanced to `M7.1`; `LAST_RUN_ID` set to latest ops run UUID)
+- Commands executed (high level):
+  - `make run-ops` (created run and executed prerequisite gates; failed overall due to `DATA_QUALITY_FAIL` but produced run summary)
+  - `make riskguard` (expected to block; wrote artifacts and exited non-zero)
+- Verification outputs (summary + paths):
+  - Ops run folder created (even though status=failed): `/data/trading-ops/artifacts/runs/6a44a8ed-e309-44fa-ab7e-c20ff4d62736/run_summary.md`
+  - Riskguard produced deterministic block artifacts:
+    - `/data/trading-ops/artifacts/runs/6a44a8ed-e309-44fa-ab7e-c20ff4d62736/no_trade.json`
+    - `/data/trading-ops/artifacts/runs/6a44a8ed-e309-44fa-ab7e-c20ff4d62736/trades_proposed.json`
+  - `no_trade.json` reasons include:
+    - `DATA_QUALITY_FAIL`, `RECONCILIATION_REQUIRED`, `LEDGER_EMPTY`, `TRADE_BUILDER_NOT_IMPLEMENTED`
+- Result: PASS
+  - Why: M6.2 is about deterministic blocking; `RISKGUARD_BLOCKED` occurred and artifacts were written with explicit reasons.
+- Next action:
+  - Execute `M7.1`
+- Blockers:
+  - Docker socket access still requires escalated execution for this agent session.

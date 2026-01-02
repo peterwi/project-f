@@ -247,7 +247,7 @@ Non-negotiables (must remain true always):
   - Artifacts:
     - `/data/trading-ops/artifacts/reports/data_quality_*.md`
 
-- [ ] **M6.2 Deterministic riskguard blocks without trade-builder (LLM cannot approve)**
+- [x] **M6.2 Deterministic riskguard blocks without trade-builder (LLM cannot approve)**
   - Objective: Ensure riskguard remains the final deterministic authority.
   - Commands:
     - `make riskguard`
