@@ -173,3 +173,22 @@ This file is append-only. Each agent message appends a new entry so the project 
   - Execute `M5.1`
 - Blockers:
   - Docker socket access still requires escalated execution for this agent session.
+
+## 2026-01-02T14:30:10Z
+
+- Milestone / checklist: completed `M5.1`; next is `M6.1`
+- What changed:
+  - Updated: `docs/CHECKLIST.md` (marked `M5.1` as DONE)
+  - Updated: `docs/PM_STATE.md` (resume pointer advanced to `M6.1`)
+- Commands executed (high level):
+  - `rg -n "signals_ranked" db/migrations/*.sql`
+  - `test -f docs/QLIB_DOCKER_EXECUTION_SPEC.md`
+- Verification outputs (summary):
+  - `signals_ranked` table exists in migrations (`db/migrations/0001_init.sql`)
+  - Qlib docker execution spec exists (`docs/QLIB_DOCKER_EXECUTION_SPEC.md`)
+- Result: PASS
+  - Why: Postgres contract exists for later ingest; Qlib bootstrap remains unblocked.
+- Next action:
+  - Execute `M6.1`
+- Blockers:
+  - Docker socket access still requires escalated execution for this agent session.

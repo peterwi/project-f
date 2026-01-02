@@ -199,7 +199,7 @@ Non-negotiables (must remain true always):
 
 ## M5 — Integrate with Postgres (later; do not block M2–M4)
 
-- [ ] **M5.1 Define `signals_ranked` ingest contract (schema + run metadata)**
+- [x] **M5.1 Define `signals_ranked` ingest contract (schema + run metadata)**
   - Objective: Specify how Qlib shadow outputs will be ingested into Postgres only after gates exist.
   - Commands:
     - `rg -n "signals_ranked" db/migrations/*.sql`
