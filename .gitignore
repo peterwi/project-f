@@ -1,0 +1,40 @@
+/.venv/
+**/__pycache__/
+*.py[cod]
+
+# Tooling
+/.serena/
+
+# Local secrets
+/config/secrets.env
+
+# Repo-local artifacts (canonical artifacts live under /data)
+/artifacts/*
+
+# Runtime artifacts (in-repo fallbacks)
+/logs/*
+!/logs/.gitkeep
+/tickets/*
+!/tickets/.gitkeep
+/reports/*
+!/reports/.gitkeep
+/signals/*
+!/signals/.gitkeep
+/trades/*
+!/trades/.gitkeep
+
+# Local data cache (optional; defaults point at /data/trading-ops/...)
+/data/raw/*
+!/data/raw/.gitkeep
+/data/clean/*
+!/data/clean/.gitkeep
+
+# If a developer ever stores backups/dumps in-repo, keep them out of git.
+/db/backups/*
+!/db/backups/.gitkeep
+*.dump
+*.dump.sha256
+
+# Local prompts / scratch
+/agent-instructions-*.txt
+/=*

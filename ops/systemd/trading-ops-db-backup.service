@@ -1,0 +1,11 @@
+[Unit]
+Description=Trading Ops - Postgres backup (pg_dump)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=peter
+SupplementaryGroups=docker
+WorkingDirectory=%h/git/project-f
+ExecStart=/usr/bin/env bash -lc 'make backup'

@@ -63,8 +63,7 @@ Target operating model for a human-in-the-loop trading workflow where the machin
 - Install Docker + docker-compose
 - Create repo `trading-ops/` with directories:
   - `config/`, `data/raw/`, `data/clean/`, `db/`, `reports/`, `tickets/`, `logs/`, `services/`
-- Decide DB: start with SQLite (simple, reliable)
-- Create a daily backup job (cron): copy `db/ledger.sqlite` to `db/backups/YYYY-MM-DD.sqlite`
+- DB: Postgres is the source of truth (see `PLAN.md`)
 - Add a single “one-command run” entrypoint (Makefile/script) that executes the whole pipeline in order and returns non-zero on any gate failure
 - **Deliverable:** running host + repo skeleton + automatic backups
 

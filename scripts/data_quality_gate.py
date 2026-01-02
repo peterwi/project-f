@@ -1,0 +1,269 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+ENV_FILE = ROOT / "config" / "secrets.env"
+COMPOSE_FILE = ROOT / "docker" / "compose.yml"
+
+
+def _read_env_file(path: Path) -> dict[str, str]:
+    env: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            raise ValueError(f"Invalid env line (no '='): {raw_line}")
+        key, value = line.split("=", 1)
+        env[key.strip()] = value.strip()
+    return env
+
+
+def _docker_compose_base(env_file: Path, compose_file: Path) -> list[str]:
+    return ["docker", "compose", "-f", str(compose_file), "--env-file", str(env_file)]
+
+
+def _psql_capture(sql: str) -> str:
+    env = _read_env_file(ENV_FILE)
+    user = env.get("POSTGRES_USER", "").strip()
+    db = env.get("POSTGRES_DB", "").strip()
+    if not user or not db:
+        raise ValueError("POSTGRES_USER and POSTGRES_DB must be set in config/secrets.env")
+
+    cmd = _docker_compose_base(ENV_FILE, COMPOSE_FILE) + [
+        "exec",
+        "-T",
+        "postgres",
+        "psql",
+        "-U",
+        user,
+        "-d",
+        db,
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-tA",
+        "-c",
+        sql,
+    ]
+    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    return result.stdout.strip()
+
+
+def _psql_exec(sql: str) -> None:
+    env = _read_env_file(ENV_FILE)
+    user = env.get("POSTGRES_USER", "").strip()
+    db = env.get("POSTGRES_DB", "").strip()
+    if not user or not db:
+        raise ValueError("POSTGRES_USER and POSTGRES_DB must be set in config/secrets.env")
+
+    cmd = _docker_compose_base(ENV_FILE, COMPOSE_FILE) + [
+        "exec",
+        "-T",
+        "postgres",
+        "psql",
+        "-U",
+        user,
+        "-d",
+        db,
+        "-v",
+        "ON_ERROR_STOP=1",
+    ]
+    subprocess.run(cmd, input=sql.encode("utf-8"), check=True)
+
+
+def _expected_asof_date(today: date) -> date:
+    # v1 rule: most recent weekday before today (T-1 weekday).
+    d = today - timedelta(days=1)
+    while d.weekday() >= 5:  # Sat/Sun
+        d -= timedelta(days=1)
+    return d
+
+
+def _artifacts_root(env: dict[str, str]) -> Path:
+    return Path(env.get("ARTIFACTS_DIR", "/data/trading-ops/artifacts")).resolve()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Deterministic data quality gate (blocks trading on failure).")
+    parser.add_argument("--asof-date", help="Override asof_date (YYYY-MM-DD). Use for US holidays/late data.")
+    parser.add_argument("--run-id", help="Optional run_id to link this gate result to a runs row.")
+    args = parser.parse_args()
+
+    if not ENV_FILE.exists():
+        raise FileNotFoundError(f"Missing {ENV_FILE}; create it from config/secrets.env.example")
+    env = _read_env_file(ENV_FILE)
+
+    today = datetime.now(timezone.utc).date()
+    expected = _expected_asof_date(today)
+    asof = date.fromisoformat(args.asof_date) if args.asof_date else expected
+    run_id = (args.run_id or "").strip()
+
+    coverage_min_pct = float(env.get("DATA_COVERAGE_MIN_PCT", "98"))
+
+    enabled_symbols = _psql_capture(
+        "select coalesce(string_agg(internal_symbol, ',' order by internal_symbol), '') from config_universe where enabled = true;"
+    )
+    enabled_list = [s for s in enabled_symbols.split(",") if s] if enabled_symbols else []
+
+    benchmark_symbols = _psql_capture(
+        "select coalesce(string_agg(internal_symbol, ',' order by internal_symbol), '') from config_universe where lower(coalesce(instrument_type,'')) <> 'stock';"
+    )
+    benchmark_list = [s for s in benchmark_symbols.split(",") if s] if benchmark_symbols else []
+
+    issues: list[str] = []
+
+    enabled_count = len(enabled_list)
+    if enabled_count == 0:
+        issues.append("No enabled symbols in config_universe (nothing tradable).")
+
+    # Coverage: enabled symbols must have a bar for asof date.
+    have_enabled = int(
+        _psql_capture(
+            f"""
+            select count(distinct internal_symbol)
+            from market_prices_eod
+            where trading_date = '{asof.isoformat()}'
+              and internal_symbol in (select internal_symbol from config_universe where enabled = true)
+            """
+        )
+        or "0"
+    )
+    coverage_pct = (100.0 * have_enabled / enabled_count) if enabled_count > 0 else 0.0
+    if enabled_count > 0 and coverage_pct + 1e-9 < coverage_min_pct:
+        issues.append(f"Coverage {coverage_pct:.2f}% below threshold {coverage_min_pct:.2f}% for asof_date={asof}.")
+
+    # Benchmarks must have asof_date present (benchmarks are ETFs, still needed for reporting).
+    missing_benchmarks: list[str] = []
+    for b in benchmark_list:
+        have = int(
+            _psql_capture(
+                f"""
+                select count(*)
+                from market_prices_eod
+                where trading_date = '{asof.isoformat()}'
+                  and internal_symbol = '{b}'
+                """
+            )
+            or "0"
+        )
+        if have == 0:
+            missing_benchmarks.append(b)
+    if missing_benchmarks:
+        issues.append(f"Missing benchmark bars for asof_date={asof}: {', '.join(missing_benchmarks)}")
+
+    # Duplicate detection (should be impossible but verify).
+    duplicates = int(
+        _psql_capture(
+            """
+            select count(*)
+            from (
+              select internal_symbol, trading_date, source, count(*) c
+              from market_prices_eod
+              group by internal_symbol, trading_date, source
+              having count(*) > 1
+            ) d
+            """
+        )
+        or "0"
+    )
+    if duplicates > 0:
+        issues.append("Duplicate (internal_symbol, trading_date, source) rows detected in market_prices_eod.")
+
+    passed = len(issues) == 0
+
+    # Write markdown report
+    artifacts = _artifacts_root(env)
+    report_dir = artifacts / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    report_path = report_dir / f"data_quality_{asof.isoformat()}_{ts}.md"
+
+    lines: list[str] = []
+    lines.append("# Data Quality Gate Report")
+    lines.append("")
+    lines.append(f"- Generated at (UTC): `{ts}`")
+    lines.append(f"- Expected date (v1 rule): `{expected.isoformat()}`")
+    lines.append(f"- As-of date used: `{asof.isoformat()}`")
+    lines.append(f"- Coverage threshold: `{coverage_min_pct:.2f}%`")
+    lines.append(f"- Enabled symbols: `{enabled_count}`")
+    lines.append(f"- Enabled with bars: `{have_enabled}`")
+    lines.append(f"- Coverage: `{coverage_pct:.2f}%`")
+    lines.append(f"- Benchmarks: `{len(benchmark_list)}`")
+    lines.append("")
+    lines.append("## Symbols")
+    lines.append("")
+    lines.append(f"- Enabled: `{', '.join(enabled_list) if enabled_list else ''}`")
+    lines.append(f"- Benchmarks: `{', '.join(benchmark_list) if benchmark_list else ''}`")
+    lines.append("")
+    lines.append("## Result")
+    lines.append("")
+    lines.append(f"- Status: `{'PASS' if passed else 'FAIL'}`")
+    lines.append("")
+    lines.append("## Issues")
+    lines.append("")
+    if issues:
+        for issue in issues:
+            lines.append(f"- {issue}")
+    else:
+        lines.append("- None")
+    lines.append("")
+    lines.append("## Notes")
+    lines.append("")
+    lines.append("- For US holidays/half-days, rerun with `--asof-date YYYY-MM-DD` if needed.")
+    lines.append("")
+
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+
+    # Store summary in Postgres
+    details = {
+        "issues": issues,
+        "enabled_symbols": enabled_list,
+        "benchmarks": benchmark_list,
+        "duplicates_detected": duplicates,
+    }
+    details_json = json.dumps(details).replace("'", "''")
+
+    _psql_exec(
+        f"""
+        insert into data_quality_reports(
+          run_id, asof_date, expected_date, passed, coverage_pct, enabled_symbols_count, benchmarks_count, details, report_path
+        ) values (
+          {("null" if not run_id else "'" + run_id.replace("'", "''") + "'")},
+          '{asof.isoformat()}',
+          '{expected.isoformat()}',
+          {str(passed).lower()},
+          {coverage_pct},
+          {enabled_count},
+          {len(benchmark_list)},
+          '{details_json}'::jsonb,
+          '{str(report_path).replace("'", "''")}'
+        );
+        """
+    )
+
+    print(f"Wrote {report_path}")
+    if passed:
+        print("DATA_QUALITY_PASS")
+        return 0
+    print("DATA_QUALITY_FAIL")
+    return 2
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except subprocess.CalledProcessError as e:
+        print(f"ERROR: psql failed: {e}", file=sys.stderr)
+        raise SystemExit(1)
+    except Exception as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        raise SystemExit(2)
