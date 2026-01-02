@@ -1,203 +1,148 @@
-# M10 — Data Quality PASS + Real Alerts Delivery (Execution Checklist)
+# M11 — Main Goal: Deterministic TRADE Ticket (safe dry-run first)
 
-This milestone combines:
-- **M10.B — Data Quality PASS** (pipeline reliability)
-- **M10.C — Real secondary alert sink** (visibility + receipts)
+Goal: fully automated daily workflow that produces deterministic trade instructions (“ticket”) once per day:
+- 08:00 UK: data/status + gates + reports
+- 14:00 UK: ticket for manual execution near US open + confirmations capture
 
-Hard boundaries:
-- No trading is enabled by this milestone (NO-TRADE only).
-- Changes must be minimal and deterministic; failures must produce artifacts under `/data`.
+Safety defaults:
+- **No live trading is enabled by this milestone.**
+- The default remains **NO_TRADE** unless the operator explicitly enables a dry-run trade mode toggle.
+- Deterministic gates win; LLM cannot approve trades.
 
-Pass definitions:
-- **M10.B PASS**
-  - `make run-0800` produces `DATA_QUALITY_PASS` and writes a PASS report under `/data/trading-ops/artifacts/reports/`
-  - AND `make run-1400` can run without refetch and does not fail the data-quality gate.
-- **M10.C PASS**
-  - A secondary sink is enabled with `ALERT_SECONDARY_DRYRUN=false`
-  - A delivery receipt is written under `/data/trading-ops/artifacts/alerts/<alert_id>/delivery.md` showing `SENT` (or deterministic `FAILED` with HTTP/status reason)
-  - Deliveries are recorded in Postgres (`alert_deliveries`).
+Run references (current known-good baseline):
+- Data-quality PASS report: `/data/trading-ops/artifacts/reports/data_quality_2025-12-31_20260102T214740Z.md`
+- Run-1400 reference: `/data/trading-ops/artifacts/runs/85828a71-6dff-438f-afa0-ead2033e3692/run_summary.md`
 
 ---
 
-## M10.B — Data Quality PASS
+## M11.1 Universe readiness (benchmarks + enough symbols + ingest coverage)
 
-- [x] **M10.B.1 Identify the current failing rule(s)**
-  - Objective: Use the latest data-quality report artifact to pinpoint the exact failing rule(s) and inputs.
+- [ ] **M11.1.a Confirm enabled universe and benchmark rows**
+  - Objective: Ensure `config_universe` contains (1) enabled tradables and (2) benchmark rows (e.g. `SPY`, `QQQ`) for reporting/gates.
   - Commands:
-    - `ls -1t /data/trading-ops/artifacts/reports/*data_quality* | head -n 5`
-    - `sed -n '1,220p' <latest_report>`
-    - If no report exists: `make run-0800` then re-check.
-  - Verification:
-    - A concrete rule name/error text and the relevant symbol/date context are identified.
-  - Artifacts:
-    - Existing report under `/data/trading-ops/artifacts/reports/`
-    - `docs/PM_LOG.md` entry recording the failing rule and report path.
-  - Done when:
-    - The failing rule(s) are identified and logged, with the report path.
-
-- [x] **M10.B.2 Capture a fresh baseline run (0800)**
-  - Objective: Run the 08:00 pipeline and capture a reproducible baseline artifact set for debugging.
-  - Commands:
-    - `git status --porcelain=v1`
-    - `make run-0800`
-    - `ls -1t /data/trading-ops/artifacts/reports/*data_quality* | head -n 3`
-  - Verification:
-    - A new data-quality report is written under `/data/trading-ops/artifacts/reports/`.
-  - Artifacts:
-    - `/data/trading-ops/artifacts/reports/<new_report>`
-  - Done when:
-    - The newest report corresponds to this run and clearly shows PASS/FAIL with reasons.
-
-- [ ] **M10.B.3 Fix universe/benchmark emptiness issues (if present)**
-  - Objective: Ensure universe is non-empty, enabled symbols are used, and benchmarks/index rows exist when required by gates.
-  - Commands:
+    - `python scripts/universe_import.py`
     - `python scripts/universe_validate.py`
-    - `python scripts/market_fetch_eod.py --max-rows 20`
-    - Re-run: `make run-0800`
+    - `set -a; source config/secrets.env; set +a; docker compose -f docker/compose.yml --env-file config/secrets.env exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA -c "select internal_symbol, enabled, stooq_symbol, instrument_type from config_universe where enabled=true or lower(coalesce(instrument_type,''))<>'stock' order by internal_symbol;"`
   - Verification:
-    - Universe validation passes and data-quality report no longer fails for “empty universe” / missing benchmark.
+    - Enabled symbols count is >0.
+    - Benchmarks include at least `SPY` and `QQQ` (or documented alternatives).
   - Artifacts:
-    - Updated data-quality report(s) under `/data/trading-ops/artifacts/reports/`
+    - `/data/trading-ops/artifacts/reports/universe_validation.md`
   - Done when:
-    - The report no longer cites universe/benchmark emptiness as a failure cause.
+    - Enabled + benchmark rows exist and validation passes.
 
-- [ ] **M10.B.4 Fix symbol mapping issues (stooq symbol suffix, etc.)**
-  - Objective: Ensure provider symbol mapping is correct so ingestion produces rows for expected symbols.
+- [ ] **M11.1.b Prove market-fetch populates EOD bars for enabled + benchmarks**
+  - Objective: Ensure `make market-fetch` writes rows into `market_prices_eod` for enabled symbols and benchmarks.
   - Commands:
-    - `python scripts/market_fetch_eod.py --max-rows 50`
-    - Inspect the failing symbols from the report and verify mapping config/code.
-    - Re-run: `make run-0800`
+    - `make market-fetch`
+    - `set -a; source config/secrets.env; set +a; docker compose -f docker/compose.yml --env-file config/secrets.env exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA -c "select internal_symbol, max(trading_date) from market_prices_eod where internal_symbol in (select internal_symbol from config_universe where enabled=true or lower(coalesce(instrument_type,''))<>'stock') group by 1 order by 1;"`
   - Verification:
-    - Previously missing symbols now ingest, and the report no longer fails on missing/mismatched symbol mapping.
+    - Each enabled symbol has at least one bar.
+    - Benchmarks have at least one bar.
   - Artifacts:
-    - Updated report(s) under `/data/trading-ops/artifacts/reports/`
+    - Raw CSVs under `/data/trading-ops/data/raw/stooq/<SYMBOL>/...`
   - Done when:
-    - The gate stops failing due to symbol mapping.
+    - EOD bars exist for enabled + benchmarks in Postgres.
 
-- [x] **M10.B.5 Fix “as-of/freshness” day alignment (US T-1 expectation)**
-  - Objective: Ensure freshness logic aligns with US trading calendar for UK-morning runs (typically expects last US trading day).
-  - Commands:
-    - Inspect rule implementation and current “as-of” date logic.
-    - Re-run: `make run-0800`
-  - Verification:
-    - Data-quality report passes freshness checks on normal weekdays and handles holidays deterministically.
-  - Artifacts:
-    - Updated report(s) under `/data/trading-ops/artifacts/reports/`
-    - If behavior changes: update `docs/DATA_QUALITY_RULES.md`
-  - Done when:
-    - Freshness checks are consistently PASS given correct upstream data.
-
-- [ ] **M10.B.6 Fix duplicates/conflicting rows (if present)**
-  - Objective: Remove deterministic-gate failures caused by duplicate/conflicting rows per symbol/date/source.
-  - Commands:
-    - Use report evidence to identify the duplication source.
-    - Run reconciliation/selftest where applicable:
-      - `python scripts/reconcile_selftest.py`
-    - Re-run: `make run-0800`
-  - Verification:
-    - Data-quality report no longer fails due to duplicates/conflicts.
-  - Artifacts:
-    - Updated report(s) under `/data/trading-ops/artifacts/reports/`
-  - Done when:
-    - Duplicate/conflict related failures are eliminated.
-
-- [x] **M10.B.7 Prove 14:00 run does not refetch and still passes**
-  - Objective: Ensure `make run-1400` works without refetch and does not fail data-quality.
+- [ ] **M11.1.c Ensure data-quality PASS with current universe**
+  - Objective: Ensure the deterministic gate passes with the enabled universe and benchmarks.
   - Commands:
     - `make run-0800`
     - `make run-1400`
-    - `ls -1t /data/trading-ops/artifacts/reports/*data_quality* | head -n 6`
   - Verification:
-    - Both runs complete and the newest data-quality reports indicate PASS.
+    - Data-quality report is PASS for the chosen as-of date (weekday expected + possible holiday fallback).
   - Artifacts:
-    - PASS report(s) under `/data/trading-ops/artifacts/reports/`
+    - `/data/trading-ops/artifacts/reports/data_quality_*.md`
+    - `/data/trading-ops/artifacts/runs/<run_id>/run_summary.md`
   - Done when:
-    - **M10.B PASS** definition is satisfied.
+    - Data-quality PASS and runs complete without refetch at 14:00.
 
 ---
 
-## M10.C — Real secondary alert sink (enable delivery; file-only remains primary)
+## M11.2 Trade-builder implementation (deterministic; dry-run mode)
 
-- [x] **M10.C.1 Inventory current alert pipeline + DB table**
-  - Objective: Confirm existing alert scripts, delivery artifacts, and Postgres table `alert_deliveries` are present and reachable.
+- [ ] **M11.2.a Define trade-builder contract**
+  - Objective: Define deterministic inputs/outputs and safety constraints for trade building.
   - Commands:
-    - `ls -la scripts | rg -n \"alert_(emit|deliver)\"`
-    - `docker compose -f docker/compose.yml --env-file config/secrets.env exec -T postgres psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -v ON_ERROR_STOP=1 -c \"\\d alert_deliveries\"`
+    - Inspect existing tables: `portfolio_targets`, `ledger_cash_movements`, `ledger_trades_intended`, `market_prices_eod`
+    - Add a short spec doc or update existing docs (if present).
   - Verification:
-    - Table exists and alert scripts are present.
+    - Contract explicitly states: no external calls; deterministic; no trading authority; produces intended trades only.
   - Artifacts:
-    - `docs/PM_LOG.md` entry capturing the table existence check.
+    - Spec doc under `docs/` (or embedded into an existing workflow doc).
   - Done when:
-    - Alert scripts and DB table are confirmed.
+    - Contract is written and agreed by checklist.
 
-- [ ] **M10.C.2 Add docs/ALERTS.md and configuration keys**
-  - Objective: Document configuration for secondary sink delivery (default to NTFY) with explicit dry-run controls.
+- [ ] **M11.2.b Implement `trade_builder` (writes ledger_trades_intended)**
+  - Objective: Deterministically convert `portfolio_targets` + latest prices + cash constraints into `ledger_trades_intended`.
   - Commands:
-    - Edit docs and add a one-command smoke test section.
+    - Implement new script (or extend existing) and wire into `run-1400` behind `DRYRUN_TRADES=true`.
   - Verification:
-    - Docs clearly state required env vars and safety defaults.
+    - With `DRYRUN_TRADES=true`, a run produces at least one intended BUY/SELL row when targets imply rebalancing.
+    - With default settings, still produces NO_TRADE.
   - Artifacts:
-    - `docs/ALERTS.md`
+    - `/data/trading-ops/artifacts/runs/<run_id>/trades_intended.json` (or similar)
+    - DB: `ledger_trades_intended` rows for the run
   - Done when:
-    - Docs exist and include a one-command smoke test.
+    - Intended trades are produced deterministically in dry-run mode only.
 
-- [ ] **M10.C.3 Implement NTFY secondary sink delivery (real HTTPS)**
-  - Objective: Add an NTFY sender to `scripts/alert_deliver.py` controlled by env vars and `ALERT_SECONDARY_DRYRUN`.
-  - Commands:
-    - Update code to POST to `ALERT_NTFY_URL` with sanitized content.
-  - Verification:
-    - Delivery attempt produces deterministic receipts (`SENT` or `FAILED` with HTTP/status reason).
-  - Artifacts:
-    - `/data/trading-ops/artifacts/alerts/<alert_id>/delivery.json`
-    - `/data/trading-ops/artifacts/alerts/<alert_id>/delivery.md`
-  - Done when:
-    - Receipts include timestamp, sink, HTTP status, and response summary (no secrets).
+---
 
-- [ ] **M10.C.4 Persist delivery receipts to Postgres**
-  - Objective: Ensure `alert_deliveries` records are written for secondary sink attempts.
-  - Commands:
-    - Run a delivery and query:
-      - `docker compose -f docker/compose.yml --env-file config/secrets.env exec -T postgres psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -tA -c \"select sink, dryrun, status, coalesce(error_text,'') from alert_deliveries order by created_at desc limit 5;\"`
-  - Verification:
-    - A row exists for the most recent delivery attempt with correct `sink`, `dryrun`, and `status`.
-  - Artifacts:
-    - DB rows + delivery receipts under `/data/.../alerts/...`
-  - Done when:
-    - DB rows reflect delivery attempts deterministically.
+## M11.3 Ticket rendering for TRADE (GBP sizing + “skip if not tradable” rules)
 
-- [ ] **M10.C.5 Add “secondary delivery smoke test” (no trading)**
-  - Objective: Provide a safe one-command test that emits a synthetic alert and delivers it.
+- [ ] **M11.3.a Extend ticket renderer to include TRADE lines**
+  - Objective: Render intended trades into human-executable ticket lines with GBP sizing guidance.
   - Commands:
-    - Document and run a test command that:
-      - emits an alert (synthetic)
-      - delivers with `ALERT_SECONDARY_DRYRUN=false`
+    - Run: `make run-1400` with `DRYRUN_TRADES=true`
+    - Inspect ticket artifact directory.
   - Verification:
-    - Receipt shows `SENT` or deterministic `FAILED` with reason, and DB row exists.
+    - Ticket includes BUY/SELL lines, sizing, and explicit “skip if only CFD / not found” rules.
   - Artifacts:
-    - `/data/trading-ops/artifacts/alerts/<alert_id>/delivery.md`
+    - `/data/trading-ops/artifacts/tickets/<ticket_id>/ticket.md`
   - Done when:
-    - Smoke test is repeatable and produces receipts + DB row.
+    - A TRADE ticket is produced in dry-run mode.
 
-- [ ] **M10.C.6 Ensure file-only remains primary sink**
-  - Objective: Keep existing file-only receipts as the primary mechanism; secondary sink is additive.
-  - Commands:
-    - Confirm primary artifacts still written even if secondary fails.
-  - Verification:
-    - Local artifact generation does not depend on secondary sink success.
-  - Artifacts:
-    - `/data/trading-ops/artifacts/alerts/<alert_id>/delivery.md`
-  - Done when:
-    - Primary artifacts always exist; secondary is best-effort.
+---
 
-- [ ] **M10.C.7 End-to-end proof**
-  - Objective: Prove **M10.C PASS** definition with one real delivery attempt.
+## M11.4 Confirmation capture for TRADE (fills → ledger_trades_fills)
+
+- [ ] **M11.4.a Extend confirmation payload to capture fills**
+  - Objective: Capture executed fills (units/value, price, timestamp) and persist into `ledger_trades_fills`.
   - Commands:
-    - Run smoke test and verify:
-      - receipts exist
-      - Postgres rows exist
+    - Extend confirmation script to accept fill details and validate deterministically.
   - Verification:
-    - **M10.C PASS** definition is satisfied.
+    - A confirmation produces DB rows in `ledger_trades_fills` and writes artifacts under the ticket dir.
   - Artifacts:
-    - Delivery receipts + DB rows + `docs/PM_LOG.md` evidence.
+    - `/data/trading-ops/artifacts/tickets/<ticket_id>/confirmation.json`
+    - DB: `ledger_trades_fills` rows
   - Done when:
-    - **M10.C PASS** definition is satisfied.
+    - Fill capture is reproducible and auditable.
+
+---
+
+## M11.5 End-to-end daily loop (08:00 status, 14:00 ticket; dry-run toggle)
+
+- [ ] **M11.5.a Wire dry-run trade ticket into 14:00**
+  - Objective: Make `make run-1400` produce a TRADE ticket only when `DRYRUN_TRADES=true` and gates PASS.
+  - Commands:
+    - `DRYRUN_TRADES=true make run-1400`
+    - `make run-1400` (default)
+  - Verification:
+    - Dry-run mode produces TRADE ticket; default produces NO_TRADE ticket.
+  - Artifacts:
+    - `/data/trading-ops/artifacts/runs/<run_id>/run_summary.md`
+    - `/data/trading-ops/artifacts/tickets/<ticket_id>/ticket.md`
+  - Done when:
+    - Daily loop is deterministic and safe by default.
+
+---
+
+## DEFERRED (nice-to-have): alerting / secondary sinks
+
+Alerting work is deferred for now; file artifacts remain primary. Revisit later.
+
+- **Deferred:** docs/ALERTS.md + configuration keys (formerly M10.C.2)
+- **Deferred:** NTFY secondary sink implementation + receipts (formerly M10.C.3–M10.C.7)
+
+Notes:
+- Alert migrations were applied and tables exist (`alerts`, `alert_deliveries`), but no further delivery feature work is required for the main goal.
