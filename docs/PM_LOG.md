@@ -614,3 +614,12 @@ This file is append-only. Each agent message appends a new entry so the project 
     - `/data/trading-ops/artifacts/rd-agent/20260102-205555Z-rd-audit-gitab5e429/run.log`
   - “No repo writes” proof captured:
     - `/data/trading-ops/artifacts/rd-agent/20260102-205555Z-rd-audit-gitab5e429/VERIFY.md`
+
+## 2026-01-02T21:19:35Z
+
+- Maintenance: clear stale blockers + tighten RD-Agent verify artifact
+- What changed:
+  - Verified Docker access is available without sudo (`docker ps` succeeds), so removed stale blocker `requires_escalated_docker_socket_access`.
+  - Removed stale blocker `openai_key_exposed_rotate_required` (RD-Agent audit succeeded and current runs sanitize logs).
+  - Updated the existing audit run’s `VERIFY.md` to be more self-contained by annotating the git-status blocks with their source files:
+    - `/data/trading-ops/artifacts/rd-agent/20260102-205555Z-rd-audit-gitab5e429/VERIFY.md`
