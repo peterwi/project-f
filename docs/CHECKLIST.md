@@ -17,7 +17,7 @@ Non-negotiables (must remain true always):
 
 ## M0 — Repo reproducibility (git tracks core files; secrets excluded)
 
-- [ ] **M0.1 Track the repo in git (baseline commit exists)**
+- [x] **M0.1 Track the repo in git (baseline commit exists)**
   - Objective: Ensure `git_commit` is meaningful for audit/repro.
   - Commands:
     - `git status --porcelain=v1`
@@ -29,7 +29,7 @@ Non-negotiables (must remain true always):
   - Artifacts:
     - One git commit containing the tracked baseline repo state.
 
-- [ ] **M0.2 Secrets are local-only (never committed)**
+- [x] **M0.2 Secrets are local-only (never committed)**
   - Objective: Prevent accidental secret leakage while keeping local ops working.
   - Commands:
     - `git status --porcelain=v1`
@@ -281,4 +281,3 @@ Non-negotiables (must remain true always):
     - Each server is runnable locally and enforces allowlisted operations.
   - Artifacts:
     - `services/mcp-*/...`
-

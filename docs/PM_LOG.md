@@ -22,3 +22,28 @@ This file is append-only. Each agent message appends a new entry so the project 
 - Blockers:
   - None recorded at this step; execution may reveal environment blockers (e.g., docker socket permissions).
 
+## 2026-01-02T13:42:51Z
+
+- Milestone / checklist: `M0` → completed `M0.1`, `M0.2`; next is `M1.1`
+- What changed:
+  - Updated: `.gitignore` (ignored `/artifacts/*` and local scratch files)
+  - Removed (untracked): `agent-instructions-2026.txt`, `=1.24.0`, `artifacts/`
+  - Removed embedded git dirs: `qlib/.git`, `python-sdk/.git` (to vendor contents for reproducible clones)
+  - Created/updated: `docs/PM_LOG.md`, `docs/PM_STATE.md`, `docs/CHECKLIST.md`
+  - Committed:
+    - `da93ece` — baseline repo tracking
+    - `cbabc8b` — vendor python-sdk contents (replaced gitlink)
+- Commands executed (high level):
+  - M0.1 verify: `git status`, `git ls-files | wc -l`, `git ls-files | sed -n ...`
+  - Fix: `git add -A`, `git commit ...`, `git rm --cached python-sdk`, `git add python-sdk`, `git commit ...`
+  - M0.2 verify: `git check-ignore -v config/secrets.env`, `rg -n "POSTGRES_PASSWORD=" ...`
+- Verification outputs (summary):
+  - `git ls-files | wc -l` is now `1083` (core files tracked)
+  - `config/secrets.env` is ignored (via `.gitignore`)
+  - No real secrets found outside `config/secrets.env` (only placeholders + checklist text)
+- Result: PASS
+  - Why: repo is now clonable/reproducible; secrets remain untracked; checklist updated to `[x]` for `M0.1` and `M0.2`.
+- Next action:
+  - Execute `M1.1`
+- Blockers:
+  - `docker ps` currently returns “permission denied … /var/run/docker.sock” for the agent session; resolve by approving escalated docker access (or ensuring this user is in the `docker` group for the harness).
