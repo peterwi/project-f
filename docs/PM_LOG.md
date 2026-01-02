@@ -272,3 +272,250 @@ This file is append-only. Each agent message appends a new entry so the project 
   - Execute `M7.1`
 - Blockers:
   - Docker socket access still requires escalated execution for this agent session.
+
+## 2026-01-02T15:05:50Z
+
+- Milestone / checklist: completed `M7.1`; next is `M7.2`
+- What changed:
+  - Updated: `scripts/ticket_render.py` (deterministic ticket rendering; parses run_summary steps; persists artifacts + DB row)
+  - Updated: `Makefile` (added `make ticket` target)
+  - Updated: `docs/CHECKLIST.md` (filled `M7.1` commands/verification; marked `M7.1` as DONE)
+  - Updated: `docs/PM_STATE.md` (resume pointer advanced to `M7.2`; recorded `LAST_TICKET_ID`)
+- Commands executed:
+  - `cat docs/PM_STATE.md`
+  - `make ticket` (required escalated Docker socket access to run `docker compose exec ... psql`)
+  - `ls -la /data/trading-ops/artifacts/tickets | tail -n 30`
+  - `docker compose ... exec -T postgres psql ... "select ticket_id, run_id, status, created_at from tickets ..."`
+- Verification outputs (summary + paths):
+  - Rendered ticket:
+    - `ticket_id`: `0aa6608d-b785-52bb-86e8-f4b25ab0c706`
+    - `run_id`: `6a44a8ed-e309-44fa-ab7e-c20ff4d62736`
+    - Artifacts:
+      - `/data/trading-ops/artifacts/tickets/0aa6608d-b785-52bb-86e8-f4b25ab0c706/ticket.md`
+      - `/data/trading-ops/artifacts/tickets/0aa6608d-b785-52bb-86e8-f4b25ab0c706/ticket.json`
+  - Postgres `tickets` row exists:
+    - `status`: `NO_TRADE`
+    - `created_at`: `2026-01-02 15:02:26.21062+00`
+- Result: PASS
+  - Why: Ticket artifacts were created on `/data` and a corresponding `tickets` DB row was inserted for `LAST_RUN_ID` with deterministic content (NO-TRADE + blocking reasons from `no_trade.json`).
+- Next action:
+  - Execute `M7.2`
+- Blockers:
+  - Docker socket access still requires escalated execution for this agent session.
+
+## 2026-01-02T15:16:37Z
+
+- Milestone / checklist: completed `M7.2`; next is `M8.1`
+- What changed:
+  - Added: `scripts/confirmations_submit.py` (submits `NO_TRADE` acknowledgement; writes artifacts under ticket dir; persists to `confirmations` + `audit_log`)
+  - Updated: `Makefile` (added `make confirm`)
+  - Updated: `docs/CHECKLIST.md` (defined `M7.2` commands/verification; marked `M7.2` as DONE)
+  - Updated: `docs/PM_STATE.md` (resume pointer advanced to `M8.1`; recorded last confirmation + snapshot ids)
+  - Updated: `docs/PM_LOG.md` (moved `M7.1`/`M7.2` entries to end to preserve append-only ordering)
+- Commands executed:
+  - `cat docs/PM_STATE.md`
+  - Ledger bootstrap + reconciliation:
+    - `make ledger-baseline CASH_GBP=0`
+    - `make reconcile-add -- --snapshot-date 2026-01-01 --cash-gbp 0`
+    - `make reconcile-run`
+  - Confirmation submission:
+    - `make confirm`
+  - Verification queries:
+    - `psql ... "select confirmation_id, ticket_id, submitted_by, submitted_at from confirmations ..."`
+    - `psql ... "select passed, evaluated_at, report_path from reconciliation_results ..."`
+- Verification outputs (summary + paths):
+  - Ledger baseline created: `baseline_created=true amount_gbp=0`
+  - Reconciliation:
+    - `snapshot_id`: `c7713564-6c68-4d58-974a-48dcfb56421c`
+    - Printed: `RECONCILIATION_PASS`
+    - Report: `/data/trading-ops/artifacts/reports/reconcile_2026-01-01_20260102T151215Z.md`
+  - Confirmation:
+    - `confirmation_uuid`: `3886fa0c-e9ad-4c06-a8f8-ab68fff95525`
+    - Artifacts:
+      - `/data/trading-ops/artifacts/tickets/0aa6608d-b785-52bb-86e8-f4b25ab0c706/confirmations/3886fa0c-e9ad-4c06-a8f8-ab68fff95525/confirmation.json`
+      - `/data/trading-ops/artifacts/tickets/0aa6608d-b785-52bb-86e8-f4b25ab0c706/confirmations/3886fa0c-e9ad-4c06-a8f8-ab68fff95525/confirmation.md`
+    - Postgres confirmation row exists for ticket `0aa6608d-b785-52bb-86e8-f4b25ab0c706`.
+- Result: PASS
+  - Why: A confirmation payload and artifacts were created and persisted to Postgres; reconciliation gate passed and wrote an auditable report artifact under `/data`.
+- Next action:
+  - Execute `M8.1`
+- Blockers:
+  - Docker socket access still requires escalated execution for this agent session.
+
+## 2026-01-02T15:47:25Z
+
+- Milestone / checklist: completed `M8.1`; next is `M8.2`
+- What changed:
+  - Added: `scripts/run_scheduled.py` (08:00/14:00 run orchestration; writes `/data/trading-ops/artifacts/runs/<run_id>/run_summary.md` and DB run rows)
+  - Added: `scripts/report_daily.py` (writes deterministic `daily_*.md` and records an `audit_log` row)
+  - Added: `docker/scheduler/Dockerfile`, `docker/scheduler/crontab`, `docker/scheduler/job.sh` (supercronic scheduler with persisted logs)
+  - Updated: `docker/compose.yml` (added `scheduler` service; TZ=Europe/London; mounts `/data` + docker socket)
+  - Updated: `Makefile` (added `run-0800`/`run-1400`; removed `chmod` from targets so scheduler can run with repo mounted read-only)
+  - Updated: `scripts/run_scheduled.py` + `scripts/riskguard_run.py` (git safe.directory handling for root-run containers)
+  - Updated: `docs/CHECKLIST.md` (defined `M8.1` commands/verification; added `M8.2`; marked `M8.1` as DONE)
+  - Updated: `docs/PM_STATE.md` (resume pointer advanced to `M8.2`; `LAST_RUN_ID`/`LAST_TICKET_ID` updated to latest scheduler-driven 14:00 run)
+  - Updated: `docs/PM_LOG.md` (this entry)
+- Commands executed (key):
+  - Manual proof runs:
+    - `make run-0800`
+    - `make run-1400` (initially failed because ticket rendering required run_summary before final summary write; fixed and re-ran)
+  - Scheduler build/run:
+    - `docker compose ... up -d --build scheduler`
+    - `docker compose ... ps`
+    - `docker compose ... exec -T scheduler cat /etc/crontab`
+    - `docker compose ... exec -T scheduler /usr/local/bin/job.sh run-1400` (to prove scheduler can execute + write logs)
+  - Verification queries:
+    - `psql ... "select run_id, created_at, status, cadence from runs ..."`
+    - `psql ... "select ticket_id, run_id, status, created_at from tickets ..."`
+  - Cleanup:
+    - Marked one orphaned `runs.status=running` row as `failed` (tool timeout artifact): `run_id=f57f9198-e794-457b-998b-e8cc4e9c69c8`
+- Verification outputs (summary + paths):
+  - Manual 08:00 run produced:
+    - `/data/trading-ops/artifacts/runs/b33e7d12-8aa5-4832-9e05-6cbd2d212473/run_summary.md`
+    - `/data/trading-ops/artifacts/reports/daily_0800_2026-01-01_20260102T153236Z.md`
+  - Manual 14:00 run produced (NO refetch; includes ticket):
+    - `/data/trading-ops/artifacts/runs/0832b7a0-7b4d-486e-8f78-99b674047fb4/run_summary.md`
+    - `/data/trading-ops/artifacts/tickets/a2a94192-3a16-5e3f-b7fd-490173935f52/ticket.md`
+    - `/data/trading-ops/artifacts/reports/daily_1400_2026-01-01_20260102T153355Z.md`
+  - Scheduler is running and configured:
+    - `docker compose ps` shows `trading-ops-scheduler` up
+    - Crontab entries:
+      - `0 8 * * * /usr/local/bin/job.sh run-0800`
+      - `0 14 * * * /usr/local/bin/job.sh run-1400`
+  - Scheduler logs persisted:
+    - `/data/trading-ops/artifacts/logs/scheduler/run-1400_20260102T154421Z.log` (and newer)
+  - Latest scheduler-driven 14:00 run + ticket:
+    - `run_id`: `76d15059-8b09-4849-863c-df5ca811eaee`
+    - `ticket_id`: `c4c5e62b-711b-5d6f-87ba-ab3e860600c4`
+- Result: PASS
+  - Why: Both 08:00 and 14:00 pipelines run end-to-end via `make run-0800`/`make run-1400`, 14:00 run does not refetch market data, daily reports are produced under `/data`, DB rows exist for runs/tickets, and a docker-compose scheduler is running with Europe/London schedule and persistent logs.
+- Next action:
+  - Execute `M8.2`
+- Blockers:
+  - Docker socket access still requires escalated execution for this agent session.
+
+## 2026-01-02T16:03:19Z
+
+- Milestone / checklist: completed `M8.2`; next is `M8.3`
+- What changed:
+  - Added: `db/migrations/0004_alerts.sql` (new `alerts` table)
+  - Added: `scripts/alert_emit.py` (deterministic file-only alert emitter + best-effort DB insert)
+  - Added: `scripts/confirmation_gate.py` (CONFIRMATION_MISSING detection + alert + `risk_checks` row)
+  - Wired alerts into gates:
+    - Updated: `scripts/data_quality_gate.py` (emit `DATA_QUALITY_FAIL` alert on FAIL)
+    - Updated: `scripts/reconcile_run.py` (emit `RECONCILIATION_FAIL` alert on FAIL)
+    - Updated: `scripts/riskguard_run.py` (emit `RISKGUARD_BLOCKED` alert on block)
+  - Updated scheduling wiring:
+    - Updated: `scripts/run_scheduled.py` (added `confirmation-gate` step before scoring)
+    - Updated: `docker/scheduler/job.sh` (emit `SCHEDULER_MISFIRE` alert on non-zero job exit)
+  - Updated: `Makefile` (added `alerts-last` helper)
+  - Updated: `docs/CHECKLIST.md` (defined and marked `M8.2` as DONE; added `M8.3` placeholder)
+  - Updated: `docs/PM_STATE.md` (resume pointer advanced to `M8.3`; `LAST_RUN_ID`/`LAST_TICKET_ID` updated to latest verification run)
+- Commands executed:
+  - `make migrate` (applied `0004_alerts.sql`)
+  - Verification runs:
+    - `make run-0800`
+    - `make run-1400`
+  - Alert verification:
+    - `ls -la /data/trading-ops/artifacts/alerts | tail -n 50`
+    - `find /data/trading-ops/artifacts/alerts -maxdepth 2 -name alert.md -type f | tail -n 5`
+    - `tail -n 80 "$(find /data/trading-ops/artifacts/alerts -maxdepth 2 -name alert.md -type f | tail -n 1)"`
+    - `make alerts-last`
+- Verification outputs (summary + paths):
+  - Alerts created under `/data/trading-ops/artifacts/alerts/`:
+    - `DATA_QUALITY_FAIL` for run `054ae0c6-9e1b-4d34-b1f8-a1ffeeb0ad4e`
+    - `DATA_QUALITY_FAIL` for run `55baf2cd-7efd-4574-8d60-e7f62cb708c1`
+    - `CONFIRMATION_MISSING` for previous ticket `c4c5e62b-711b-5d6f-87ba-ab3e860600c4`
+    - `RISKGUARD_BLOCKED` for run `55baf2cd-7efd-4574-8d60-e7f62cb708c1`
+  - Postgres `alerts` rows exist (queried via `make alerts-last`) and are queryable for last 20.
+- Result: PASS
+  - Why: Alerts are emitted deterministically to file artifacts and recorded in Postgres for the required minimum event set (including DATA_QUALITY_FAIL and RISKGUARD_BLOCKED); confirmation gate emits CONFIRMATION_MISSING; scheduler misfire wiring is in place.
+- Next action:
+  - Execute `M8.3` (choose secondary sink later; file-only remains primary)
+- Blockers:
+  - Docker socket access still requires escalated execution for this agent session.
+
+## 2026-01-02T16:11:58Z
+
+- Milestone / checklist: completed `M8.3`; next is `M9.1`
+- What changed:
+  - Added: `db/migrations/0005_alert_deliveries.sql` (new `alert_deliveries` table)
+  - Added: `scripts/alert_deliver.py` (secondary sink abstraction + dry-run receipts; best-effort DB insert)
+  - Updated: `scripts/alert_emit.py` (invokes `alert_deliver` after writing alert artifact; keeps file-first guarantee)
+  - Updated: `config/policy.yml` (documented `alerts.secondary_sink` + `alerts.secondary_dryrun`)
+  - Updated: `config/secrets.env.example` (added `ALERT_SECONDARY_*` keys + placeholder vars for SMTP/Slack/ntfy)
+  - Updated: `docs/CHECKLIST.md` (defined and marked `M8.3` as DONE)
+  - Updated: `docs/PM_STATE.md` (resume pointer advanced to `M9.1`; updated `LAST_RUN_ID`/`LAST_TICKET_ID`)
+- Commands executed:
+  - `make migrate` (applied `0005_alert_deliveries.sql`)
+  - Verification runs:
+    - `ALERT_SECONDARY_SINK=none ALERT_SECONDARY_DRYRUN=true make run-1400` (expect delivery `SKIPPED`)
+    - `ALERT_SECONDARY_SINK=slack ALERT_SECONDARY_DRYRUN=true make run-1400` (dry-run; delivery `WOULD_SEND`)
+  - Verification checks:
+    - `find /data/trading-ops/artifacts/alerts -maxdepth 2 -name delivery.md -type f | tail -n 5`
+    - Postgres query: `select ... from alert_deliveries order by created_at desc limit 20;`
+- Verification outputs (summary + paths):
+  - Delivery receipts created under alert folders:
+    - `/data/trading-ops/artifacts/alerts/*/delivery.md`
+    - `/data/trading-ops/artifacts/alerts/*/delivery.json`
+  - Postgres `alert_deliveries` shows:
+    - `sink=none status=SKIPPED` (for sink none)
+    - `sink=slack status=WOULD_SEND dryrun=true` (dry-run; no network send attempted)
+- Result: PASS
+  - Why: Secondary sink selection is abstracted behind `alert_deliver` with a deterministic dry-run mode; file-only remains primary and cannot be bypassed; delivery attempts are recorded as receipts and in Postgres.
+- Next action:
+  - Choose the first real secondary sink to enable later: `Slack` vs `ntfy` vs `email` (still optional; file-only remains primary).
+- Blockers:
+  - Docker socket access still requires escalated execution for this agent session.
+
+## 2026-01-02T16:16:47Z
+
+- Milestone / checklist: completed `M9.1`; next is `M9.2`
+- What changed:
+  - Added: `docs/RD_AGENT_POLICY.md` (ADVISORY/DEV-ONLY boundaries; allowed/disallowed actions; review workflow)
+  - Added: `docs/RD_AGENT_RUNBOOK.md` (how to run locally; artifacts under `/data/trading-ops/artifacts/rd-agent/<run_id>/`; how to reference CHECKLIST/PM_STATE)
+  - Updated: `docs/CHECKLIST.md` (replaced M9 section with `M9.1`–`M9.3` RD-Agent items; marked `M9.1` as DONE; documented future MCPs but did not build them)
+  - Updated: `docs/PM_STATE.md` (resume pointer advanced to `M9.2`; `LAST_SUCCESSFUL_STEP=M9.1`)
+- Commands executed (verification):
+  - `ls -la docs/RD_AGENT_POLICY.md docs/RD_AGENT_RUNBOOK.md`
+  - `rg -n "M9\\." docs/CHECKLIST.md`
+  - `cat docs/PM_STATE.md`
+- Verification outputs (summary):
+  - Both docs exist under `docs/` and are readable.
+  - `docs/CHECKLIST.md` contains `M9.1`–`M9.3`.
+  - `docs/PM_STATE.md` now points to `CURRENT_CHECKLIST_ITEM=M9.2`.
+- Result: PASS
+  - Why: Required policy + runbook scaffolding exists and is tracked in the checklist; no new MCPs or RD-Agent autonomy were enabled.
+- Next action:
+  - Execute `M9.2` (RD-Agent dry-run repo audit; no changes applied) when RD-Agent is installed/available locally.
+- Blockers:
+  - RD-Agent is not installed/configured in this environment yet (expected for M9.1).
+
+## 2026-01-02T16:30:41Z
+
+- Milestone / checklist: attempted `M9.2` (RD-Agent dry-run audit); next remains `M9.2`
+- What changed:
+  - Wrote audit-only artifacts under `/data` (no repo file modifications by the audit run itself):
+    - `/data/trading-ops/artifacts/rd-agent/20260102-162016Z-rd-audit-git6fe590a/AUDIT.md`
+    - `/data/trading-ops/artifacts/rd-agent/20260102-162016Z-rd-audit-git6fe590a/BACKLOG.md`
+    - `/data/trading-ops/artifacts/rd-agent/20260102-162016Z-rd-audit-git6fe590a/RISKS.md`
+    - `/data/trading-ops/artifacts/rd-agent/20260102-162016Z-rd-audit-git6fe590a/REPRO_STEPS.md`
+  - Updated: `docs/CHECKLIST.md` (noted M9.2 blocker: RD-Agent not installed)
+  - Updated: `docs/PM_STATE.md` (recorded `LAST_RD_AGENT_RUN_ID`; added blocker `rd_agent_not_installed`)
+- Commands executed:
+  - Create artifacts dir:
+    - `RD_AGENT_RUN_ID=...; mkdir -p /data/trading-ops/artifacts/rd-agent/$RD_AGENT_RUN_ID`
+  - Detect RD-Agent:
+    - `command -v rd-agent rdagent ...` (not found)
+    - `python3 -c importlib.util.find_spec(...)` (not found)
+  - Verification:
+    - `ls -la /data/trading-ops/artifacts/rd-agent/$RD_AGENT_RUN_ID`
+    - `sed -n '1,120p' /data/trading-ops/artifacts/rd-agent/$RD_AGENT_RUN_ID/AUDIT.md`
+    - `git status --porcelain=v1` (captured BEFORE/AFTER into `/data/.../git_status_{before,after}.txt`)
+- Result: FAIL
+  - Why: Microsoft RD-Agent is not installed/available in this environment, so an actual RD-Agent run could not be executed as specified; a manual audit pack was produced as a fallback.
+- Next action:
+  - Install/configure RD-Agent locally (ADVISORY/DEV-ONLY) so `M9.2` can be re-run with a real audit-only invocation.
+- Blockers:
+  - `rd_agent_not_installed`
+  - `requires_escalated_docker_socket_access`

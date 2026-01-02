@@ -82,6 +82,29 @@ def _psql_exec(sql: str) -> None:
 def _artifacts_root(env: dict[str, str]) -> Path:
     return Path(env.get("ARTIFACTS_DIR", "/data/trading-ops/artifacts")).resolve()
 
+def _emit_alert(*, snapshot_id: str, snapshot_date: str, issues: list[str], report_path: Path) -> None:
+    details = {
+        "snapshot_id": snapshot_id,
+        "snapshot_date": snapshot_date,
+        "issues": issues,
+        "report_path": str(report_path),
+    }
+    cmd = [
+        "python3",
+        "scripts/alert_emit.py",
+        "--alert-type",
+        "RECONCILIATION_FAIL",
+        "--severity",
+        "ERROR",
+        "--summary",
+        f"RECONCILIATION_FAIL snapshot_date={snapshot_date} snapshot_id={snapshot_id}",
+        "--details-json",
+        json.dumps(details),
+        "--artifact-path",
+        str(report_path),
+    ]
+    subprocess.run(cmd, cwd=str(ROOT), check=False, capture_output=True, text=True)
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run reconciliation gate vs latest snapshot.")
@@ -256,6 +279,7 @@ def main() -> int:
     if passed:
         print("RECONCILIATION_PASS")
         return 0
+    _emit_alert(snapshot_id=snapshot_id, snapshot_date=snapshot_date, issues=issues, report_path=report_path)
     print("RECONCILIATION_FAIL")
     return 2
 

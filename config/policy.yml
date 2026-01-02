@@ -49,3 +49,7 @@ reconcile:
 data_quality:
   coverage_min_pct: 98
 
+# Alerts: file-only primary is mandatory. Secondary sink is optional and best-effort.
+alerts:
+  secondary_sink: none   # none|email|slack|ntfy
+  secondary_dryrun: true

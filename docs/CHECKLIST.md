@@ -260,47 +260,151 @@ Non-negotiables (must remain true always):
 
 ## M7 — Ticketing + confirmations loop (manual eToro execution only)
 
-- [ ] **M7.1 Deterministic ticket renderer (Markdown + JSON)**
-  - Objective: Render unambiguous trade instructions and store as artifacts + DB rows.
+ - [x] **M7.1 Deterministic ticket renderer (Markdown + JSON)**
+  - Objective: Convert deterministic run artifacts into an unambiguous human ticket (NO-TRADE included), and persist ticket to Postgres.
   - Commands:
-    - (to be implemented)
+    - `cat docs/PM_STATE.md`
+    - `make ticket` (defaults to `LAST_RUN_ID` from `docs/PM_STATE.md`)
+    - `make ticket RUN_ID=<run_id>` (optional override)
+    - `ls -la /data/trading-ops/artifacts/tickets | tail -n 30`
+    - `set -a; source config/secrets.env; set +a; docker compose -f docker/compose.yml --env-file config/secrets.env exec -T postgres \
+      psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+      "select ticket_id, run_id, status, created_at from tickets order by created_at desc limit 5;"`
   - Verification:
-    - Ticket artifacts exist under `/data/trading-ops/artifacts/tickets/`.
+    - `make ticket` prints `ticket_id=...` and writes:
+      - `/data/trading-ops/artifacts/tickets/<ticket_id>/ticket.md`
+      - `/data/trading-ops/artifacts/tickets/<ticket_id>/ticket.json`
+    - Postgres shows a `tickets` row for the `run_id` with `status` in (`TRADE`,`NO_TRADE`).
   - Artifacts:
-    - `/data/trading-ops/artifacts/tickets/<ticket_id>.md`
-    - `/data/trading-ops/artifacts/tickets/<ticket_id>.json`
+    - `/data/trading-ops/artifacts/tickets/<ticket_id>/ticket.md`
+    - `/data/trading-ops/artifacts/tickets/<ticket_id>/ticket.json`
 
-- [ ] **M7.2 Confirmation capture persists fills and reconciles ledger**
+- [x] **M7.2 Confirmation capture persists fills and reconciles ledger**
   - Objective: Close the loop: intended → executed → ledger truth.
   - Commands:
-    - (to be implemented)
+    - `cat docs/PM_STATE.md`
+    - `make confirm` (submits a `NO_TRADE` acknowledgement for `LAST_TICKET_ID`)
+    - One-time ledger bootstrap (if missing):
+      - `make ledger-baseline CASH_GBP=<available_cash_gbp>`
+    - Reconciliation snapshot + gate:
+      - `make reconcile-add -- --snapshot-date <asof_date> --cash-gbp <available_cash_gbp>`
+      - `make reconcile-run`
+    - Verify DB rows:
+      - `set -a; source config/secrets.env; set +a; docker compose -f docker/compose.yml --env-file config/secrets.env exec -T postgres \
+        psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+        "select confirmation_id, ticket_id, submitted_by, submitted_at from confirmations order by submitted_at desc limit 5;"`
+      - `set -a; source config/secrets.env; set +a; docker compose -f docker/compose.yml --env-file config/secrets.env exec -T postgres \
+        psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+        "select passed, evaluated_at, report_path from reconciliation_results order by evaluated_at desc limit 5;"`
   - Verification:
-    - Confirmations stored; fills written; reconciliation gate reflects reality.
+    - Confirmation artifact exists under `/data/trading-ops/artifacts/tickets/<ticket_id>/confirmations/<confirmation_uuid>/`.
+    - Postgres has a new `confirmations` row for the ticket.
+    - `make reconcile-run` prints `RECONCILIATION_PASS` and writes `/data/trading-ops/artifacts/reports/reconcile_*.md`.
   - Artifacts:
-    - DB rows + reconciliation reports.
+    - `/data/trading-ops/artifacts/tickets/<ticket_id>/confirmations/<confirmation_uuid>/confirmation.json`
+    - `/data/trading-ops/artifacts/tickets/<ticket_id>/confirmations/<confirmation_uuid>/confirmation.md`
+    - `/data/trading-ops/artifacts/reports/reconcile_*.md`
 
 ---
 
 ## M8 — Reporting / alerts
 
-- [ ] **M8.1 Daily report (even on NO-TRADE)**
-  - Objective: Always produce an operator report with gate status and ledger snapshot.
+- [x] **M8.1 Daily report (even on NO-TRADE)**
+  - Objective: Fully automate 08:00/14:00 UK daily ops with artifacts + DB rows, including daily operator reports (NO-TRADE included).
   - Commands:
-    - (to be implemented)
+    - `make run-0800`
+    - `make run-1400`
+    - `docker compose -f docker/compose.yml --env-file config/secrets.env ps`
+    - `ls -la /data/trading-ops/artifacts/runs | tail -n 20`
+    - `ls -la /data/trading-ops/artifacts/reports | tail -n 20`
+    - Query latest runs/tickets:
+      - `set -a; source config/secrets.env; set +a; docker compose -f docker/compose.yml --env-file config/secrets.env exec -T postgres \
+        psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+        "select run_id, created_at, status from runs order by created_at desc limit 10;"`
+      - `set -a; source config/secrets.env; set +a; docker compose -f docker/compose.yml --env-file config/secrets.env exec -T postgres \
+        psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+        "select ticket_id, run_id, status, created_at from tickets order by created_at desc limit 10;"`
+    - Start scheduler:
+      - `docker compose -f docker/compose.yml --env-file config/secrets.env up -d scheduler`
   - Verification:
-    - `daily_*.md` exists under `/data/trading-ops/artifacts/reports/`.
+    - `make run-0800` writes `/data/trading-ops/artifacts/runs/<run_id>/run_summary.md` and `/data/trading-ops/artifacts/reports/daily_0800_*.md`.
+    - `make run-1400` writes `/data/trading-ops/artifacts/runs/<run_id>/run_summary.md`, generates a ticket, and writes `/data/trading-ops/artifacts/reports/daily_1400_*.md`.
+    - `scheduler` container is running and will execute at 08:00 and 14:00 Europe/London without refetching at 14:00.
   - Artifacts:
     - `/data/trading-ops/artifacts/reports/daily_*.md`
+    - `/data/trading-ops/artifacts/logs/scheduler/*.log`
+
+- [x] **M8.2 File-only alerts wiring (deterministic)**
+  - Objective: Emit deterministic alert artifacts (file sink) and record alerts in Postgres for key failure/block events.
+  - Commands:
+    - `make run-0800` (expect: if `DATA_QUALITY_FAIL` then alert)
+    - `make run-1400` (expect: `RISKGUARD_BLOCKED` alert)
+    - `ls -la /data/trading-ops/artifacts/alerts | tail -n 50`
+    - `find /data/trading-ops/artifacts/alerts -maxdepth 2 -name alert.md -type f | tail -n 5`
+    - `tail -n 80 "$(find /data/trading-ops/artifacts/alerts -maxdepth 2 -name alert.md -type f | tail -n 1)"`
+    - `make alerts-last`
+  - Verification:
+    - At least two alert folders exist under `/data/trading-ops/artifacts/alerts/<alert_id>/` with `alert.md` + `alert.json`.
+    - `make alerts-last` shows recent alerts in Postgres.
+  - Artifacts:
+    - `/data/trading-ops/artifacts/alerts/<alert_id>/alert.json`
+    - `/data/trading-ops/artifacts/alerts/<alert_id>/alert.md`
+
+- [x] **M8.3 Secondary sink abstraction + dry-run (no network delivery yet)**
+  - Objective: Keep file-only as mandatory primary sink, and add optional secondary sink config + dry-run receipts without sending.
+  - Commands:
+    - `make run-1400` (with `ALERT_SECONDARY_SINK=none` → delivery `SKIPPED`)
+    - Set `ALERT_SECONDARY_SINK=slack` and `ALERT_SECONDARY_DRYRUN=true`, then:
+      - `make run-1400` (delivery `WOULD_SEND`)
+    - `find /data/trading-ops/artifacts/alerts -maxdepth 2 -name delivery.md -type f | tail -n 5`
+    - `set -a; source config/secrets.env; set +a; docker compose -f docker/compose.yml --env-file config/secrets.env exec -T postgres \
+      psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+      "select created_at, alert_id, sink, dryrun, status, coalesce(error_text,'') from alert_deliveries order by created_at desc limit 20;"`
+  - Verification:
+    - `delivery.md` exists for new alerts and DB contains `alert_deliveries` rows with `SKIPPED` (none) and `WOULD_SEND` (dry-run).
+  - Artifacts:
+    - `/data/trading-ops/artifacts/alerts/<alert_id>/delivery.json`
+    - `/data/trading-ops/artifacts/alerts/<alert_id>/delivery.md`
 
 ---
 
-## M9 — Custom MCPs buildout (market-data, qlib, ledger, riskguard, ticketing, comms, reporting)
+## M9 — Optional RD-Agent integration + future MCPs
 
-- [ ] **M9.1 Implement local MCP servers with strict boundaries**
-  - Objective: Add MCP servers only after core deterministic loop is stable.
+- [x] **M9.1 RD-Agent policy + runbook (ADVISORY/DEV-ONLY)**
+  - Objective: Document strict boundaries so RD-Agent can accelerate engineering without any decision/trade authority.
   - Commands:
-    - (to be implemented)
+    - `ls -la docs/RD_AGENT_POLICY.md docs/RD_AGENT_RUNBOOK.md`
   - Verification:
-    - Each server is runnable locally and enforces allowlisted operations.
+    - Both docs exist and explicitly state allowed vs disallowed actions.
   - Artifacts:
-    - `services/mcp-*/...`
+    - `docs/RD_AGENT_POLICY.md`
+    - `docs/RD_AGENT_RUNBOOK.md`
+
+- [ ] **M9.2 Run RD-Agent in dry-run repo audit mode (no changes applied)**
+  - Objective: Prove RD-Agent can analyze and propose without modifying repo state.
+  - Commands:
+    - (to be implemented when RD-Agent is installed locally)
+  - Verification:
+    - RD-Agent produces audit artifacts under `/data/trading-ops/artifacts/rd-agent/<run_id>/` and no repo files change.
+  - Artifacts:
+    - `/data/trading-ops/artifacts/rd-agent/<run_id>/outputs.md`
+    - `/data/trading-ops/artifacts/rd-agent/<run_id>/patch.diff` (optional)
+  - Blocker:
+    - RD-Agent is not installed/available in this environment yet; install/configure RD-Agent and rerun.
+
+- [ ] **M9.3 Allow RD-Agent to propose one patch and validate via checklist**
+  - Objective: Run the full workflow: proposal → human review → apply → verify → log.
+  - Commands:
+    - (to be implemented when RD-Agent is installed locally)
+  - Verification:
+    - Patch is applied manually and verification commands for the target checklist item(s) pass.
+  - Artifacts:
+    - `/data/trading-ops/artifacts/rd-agent/<run_id>/patch.diff`
+    - `docs/PM_LOG.md` entry with verification outputs
+
+### Future (not built in M9.1)
+
+- **Future MCPs (optional):**
+  - `mcp-repo` (safe file ops abstraction)
+  - `mcp-ci` (run make targets + capture artifacts)
+  - `mcp-db-readonly` (read-only queries for reporting; no writes)

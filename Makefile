@@ -33,6 +33,11 @@ help:
 	@echo "  make policy-validate  # validate config/policy.yml"
 	@echo "  make stub-signals     # write stub signals to DB"
 	@echo "  make riskguard        # deterministic approve/block"
+	@echo "  make ticket           # render ticket for LAST_RUN_ID (or RUN_ID=...)"
+	@echo "  make confirm          # submit ticket confirmation (defaults LAST_TICKET_ID)"
+	@echo "  make run-0800         # scheduled 08:00 UK pipeline run"
+	@echo "  make run-1400         # scheduled 14:00 UK pipeline run (NO refetch)"
+	@echo "  make alerts-last      # print last 20 alerts"
 
 .PHONY: init-host-dirs
 init-host-dirs:
@@ -103,8 +108,7 @@ psql:
 
 .PHONY: migrate
 migrate:
-	@chmod +x scripts/db_migrate.sh
-	@./scripts/db_migrate.sh
+	@bash scripts/db_migrate.sh
 
 .PHONY: db-tables
 db-tables:
@@ -175,17 +179,14 @@ install-backup-timer:
 
 .PHONY: universe-import
 universe-import:
-	@chmod +x scripts/universe_import.py
 	@python3 scripts/universe_import.py
 
 .PHONY: universe-validate
 universe-validate:
-	@chmod +x scripts/universe_validate.py
 	@python3 scripts/universe_validate.py
 
 .PHONY: market-fetch
 market-fetch:
-	@chmod +x scripts/market_fetch_eod.py
 	@python3 scripts/market_fetch_eod.py
 
 .PHONY: fetch-eod
@@ -198,7 +199,6 @@ data-quality:
 
 .PHONY: ledger-report
 ledger-report:
-	@chmod +x scripts/ledger_report.py
 	@python3 scripts/ledger_report.py
 
 .PHONY: ledger-baseline
@@ -218,7 +218,6 @@ reconcile-add:
 
 .PHONY: reconcile-run
 reconcile-run:
-	@chmod +x scripts/reconcile_run.py
 	@python3 scripts/reconcile_run.py $(filter-out $@,$(MAKECMDGOALS))
 
 .PHONY: reconcile-selftest
@@ -233,7 +232,6 @@ run-ops:
 
 .PHONY: policy-validate
 policy-validate:
-	@chmod +x scripts/policy_validate.py
 	@python3 scripts/policy_validate.py
 
 .PHONY: stub-signals
@@ -245,6 +243,41 @@ stub-signals:
 riskguard:
 	@chmod +x scripts/riskguard_run.py
 	@python3 scripts/riskguard_run.py $(filter-out $@,$(MAKECMDGOALS))
+
+.PHONY: ticket
+ticket:
+	@chmod +x scripts/ticket_render.py
+	@set -euo pipefail; \
+	if [[ -n "$${RUN_ID:-}" ]]; then \
+	  python3 scripts/ticket_render.py --run-id "$$RUN_ID"; \
+	else \
+	  python3 scripts/ticket_render.py; \
+	fi
+
+.PHONY: confirm
+confirm:
+	@chmod +x scripts/confirmations_submit.py
+	@set -euo pipefail; \
+	python3 scripts/confirmations_submit.py --ack-no-trade
+
+.PHONY: run-0800
+run-0800:
+	@python3 scripts/run_scheduled.py --cadence 0800
+
+.PHONY: run-1400
+run-1400:
+	@python3 scripts/run_scheduled.py --cadence 1400
+
+.PHONY: alerts-last
+alerts-last:
+	@set -euo pipefail; \
+	set -a; source "$(ENV_FILE)"; set +a; \
+	docker compose -f "$(COMPOSE_FILE)" --env-file "$(ENV_FILE)" exec -T postgres \
+	  psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+	  "select created_at, alert_type, severity, coalesce(run_id::text,'-') as run_id, coalesce(ticket_id::text,'-') as ticket_id, summary from alerts order by created_at desc limit 20;"; \
+	echo ""; \
+	echo "Latest alert dir:"; \
+	ls -1dt /data/trading-ops/artifacts/alerts/* 2>/dev/null | head -n 1 || true
 
 # Allow passing CLI args via extra MAKECMDGOALS, e.g.:
 #   make reconcile-add -- --snapshot-date 2025-12-22 --cash-gbp 25.88 --position AAPL=0.1

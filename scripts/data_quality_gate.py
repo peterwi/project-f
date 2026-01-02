@@ -91,6 +91,36 @@ def _expected_asof_date(today: date) -> date:
 def _artifacts_root(env: dict[str, str]) -> Path:
     return Path(env.get("ARTIFACTS_DIR", "/data/trading-ops/artifacts")).resolve()
 
+def _emit_alert(*, run_id: str, asof: date, expected: date, coverage_pct: float, coverage_min_pct: float, issues: list[str], report_path: Path) -> None:
+    details = {
+        "asof_date": asof.isoformat(),
+        "expected_date": expected.isoformat(),
+        "coverage_pct": coverage_pct,
+        "coverage_min_pct": coverage_min_pct,
+        "issues": issues,
+        "report_path": str(report_path),
+    }
+    artifact_paths = [str(report_path)]
+    if run_id:
+        artifact_paths.append(f"/data/trading-ops/artifacts/runs/{run_id}/run_summary.md")
+    cmd = [
+        "python3",
+        "scripts/alert_emit.py",
+        "--alert-type",
+        "DATA_QUALITY_FAIL",
+        "--severity",
+        "ERROR",
+        "--summary",
+        f"DATA_QUALITY_FAIL asof_date={asof.isoformat()} coverage={coverage_pct:.2f}%<min={coverage_min_pct:.2f}%",
+        "--details-json",
+        json.dumps(details),
+    ]
+    if run_id:
+        cmd += ["--run-id", run_id]
+    for p in artifact_paths:
+        cmd += ["--artifact-path", p]
+    subprocess.run(cmd, cwd=str(ROOT), check=False, capture_output=True, text=True)
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Deterministic data quality gate (blocks trading on failure).")
@@ -254,6 +284,15 @@ def main() -> int:
     if passed:
         print("DATA_QUALITY_PASS")
         return 0
+    _emit_alert(
+        run_id=run_id,
+        asof=asof,
+        expected=expected,
+        coverage_pct=coverage_pct,
+        coverage_min_pct=coverage_min_pct,
+        issues=issues,
+        report_path=report_path,
+    )
     print("DATA_QUALITY_FAIL")
     return 2
 

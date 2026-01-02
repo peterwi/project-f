@@ -1,0 +1,6 @@
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Schedule is in Europe/London; DST handled via TZ in container environment.
+0 8 * * * /usr/local/bin/job.sh run-0800
+0 14 * * * /usr/local/bin/job.sh run-1400

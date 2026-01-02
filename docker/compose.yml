@@ -23,6 +23,23 @@ services:
       retries: 20
       start_period: 10s
 
+  scheduler:
+    build:
+      context: ..
+      dockerfile: docker/scheduler/Dockerfile
+    image: trading-ops/scheduler:local
+    container_name: trading-ops-scheduler
+    restart: unless-stopped
+    environment:
+      TZ: Europe/London
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "/data:/data"
+      - "..:/repo:ro"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   qlib-runner:
     build:
       context: ..

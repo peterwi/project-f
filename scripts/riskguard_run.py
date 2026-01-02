@@ -86,7 +86,7 @@ def _psql_exec(sql: str) -> None:
 def _git_commit() -> str:
     try:
         out = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
+            ["git", "-c", "safe.directory=*", "rev-parse", "HEAD"],
             cwd=str(ROOT),
             check=True,
             capture_output=True,
@@ -104,6 +104,37 @@ def _policy_hash() -> str:
 
 def _artifacts_root(env: dict[str, str]) -> Path:
     return Path(env.get("ARTIFACTS_DIR", "/data/trading-ops/artifacts")).resolve()
+
+def _emit_alert_blocked(*, run_id: str, asof: str, reasons: list[dict], risk_checks: list[tuple[str, bool, dict]], run_dir: Path, no_trade_path: Path, proposed_path: Path) -> None:
+    details = {
+        "run_id": run_id,
+        "asof_date": asof,
+        "reasons": reasons,
+        "risk_checks": [{"name": n, "passed": ok, "detail": d} for (n, ok, d) in risk_checks],
+        "no_trade_json": str(no_trade_path),
+        "trades_proposed_json": str(proposed_path),
+    }
+    cmd = [
+        "python3",
+        "scripts/alert_emit.py",
+        "--alert-type",
+        "RISKGUARD_BLOCKED",
+        "--severity",
+        "WARN",
+        "--run-id",
+        run_id,
+        "--summary",
+        f"RISKGUARD_BLOCKED run_id={run_id} asof_date={asof}",
+        "--details-json",
+        json.dumps(details),
+        "--artifact-path",
+        str(run_dir / "run_summary.md"),
+        "--artifact-path",
+        str(no_trade_path),
+        "--artifact-path",
+        str(proposed_path),
+    ]
+    subprocess.run(cmd, cwd=str(ROOT), check=False, capture_output=True, text=True)
 
 
 def _latest_ops_run_id() -> str:
@@ -328,6 +359,15 @@ def main() -> int:
     out.write_text(json.dumps(no_trade, indent=2, sort_keys=True), encoding="utf-8")
     print(f"Wrote {proposed_path}")
     print(f"Wrote {out}")
+    _emit_alert_blocked(
+        run_id=run_id,
+        asof=asof,
+        reasons=reasons,
+        risk_checks=risk_checks,
+        run_dir=run_dir,
+        no_trade_path=out,
+        proposed_path=proposed_path,
+    )
     print("RISKGUARD_BLOCKED")
     return 2
 
