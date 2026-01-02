@@ -56,7 +56,7 @@ Non-negotiables (must remain true always):
 
 ## M1 — Docker foundation (compose structure + /data mounts + postgres verified)
 
-- [ ] **M1.1 Enable Docker access in this session (required for all docker-first work)**
+- [x] **M1.1 Enable Docker access in this session (required for all docker-first work)**
   - Objective: Ensure this orchestrator can run Docker commands (needed for Qlib runner + Compose changes).
   - Commands:
     - `docker ps`
@@ -66,7 +66,7 @@ Non-negotiables (must remain true always):
   - Artifacts:
     - None.
 
-- [ ] **M1.2 Postgres verified (running + healthy + bound to 127.0.0.1:5432)**
+- [x] **M1.2 Postgres verified (running + healthy + bound to 127.0.0.1:5432)**
   - Objective: Confirm the Postgres SoT container is healthy and reachable.
   - Commands:
     - `docker ps --format 'table {{.Names}}\\t{{.Status}}\\t{{.Ports}}' | rg -n "trading-ops-postgres|5432"`
@@ -79,7 +79,7 @@ Non-negotiables (must remain true always):
   - Artifacts:
     - Running container: `trading-ops-postgres`
 
-- [ ] **M1.3 /data directories exist for Postgres + backups + Qlib**
+- [x] **M1.3 /data directories exist for Postgres + backups + Qlib**
   - Objective: Ensure host persistence paths exist before any builds/runs.
   - Commands:
     - `sudo mkdir -p /data/qlib /data/artifacts/trading-ops/qlib-shadow`

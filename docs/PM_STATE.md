@@ -1,4 +1,4 @@
-CURRENT_CHECKLIST_ITEM=M1.1
+CURRENT_CHECKLIST_ITEM=M2.1
 LAST_RUN_ID=
-LAST_SUCCESSFUL_STEP=M0.2
-BLOCKERS=docker_socket_permission_denied_for_agent
+LAST_SUCCESSFUL_STEP=M1.3
+BLOCKERS=requires_escalated_docker_socket_access

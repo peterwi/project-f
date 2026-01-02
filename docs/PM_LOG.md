@@ -47,3 +47,30 @@ This file is append-only. Each agent message appends a new entry so the project 
   - Execute `M1.1`
 - Blockers:
   - `docker ps` currently returns “permission denied … /var/run/docker.sock” for the agent session; resolve by approving escalated docker access (or ensuring this user is in the `docker` group for the harness).
+
+## 2026-01-02T13:46:16Z
+
+- Milestone / checklist: completed `M1.1`–`M1.3`; next is `M2.1`
+- What changed:
+  - Updated: `docs/CHECKLIST.md` (marked `M1.1`, `M1.2`, `M1.3` as DONE)
+  - Updated: `docs/PM_STATE.md` (resume pointer advanced to `M2.1`)
+- Commands executed (high level):
+  - `docker ps` (required escalated docker socket access)
+  - `docker compose version`
+  - `make health`, `make psql` (required escalated docker socket access)
+  - `sudo mkdir -p /data/qlib /data/artifacts/trading-ops/qlib-shadow`
+  - `sudo chown -R <uid>:<gid> /data/qlib /data/artifacts/trading-ops`
+  - `ls -la /data/qlib /data/artifacts/trading-ops/qlib-shadow`
+- Verification outputs (summary):
+  - Postgres container is healthy and reachable:
+    - `make health` → `accepting connections`
+    - `make psql` → `select 1` returns `1`
+  - `/data` persistence paths created:
+    - `/data/qlib/` exists and owned by `peter`
+    - `/data/artifacts/trading-ops/qlib-shadow/` exists and owned by `peter`
+- Result: PASS
+  - Why: Docker + Postgres verified; required /data directories exist for docker-first Qlib work.
+- Next action:
+  - Execute `M2.1`
+- Blockers:
+  - Docker socket access still requires escalated execution for this agent session (non-escalated docker calls fail).
