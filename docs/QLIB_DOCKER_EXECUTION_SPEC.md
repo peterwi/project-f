@@ -17,6 +17,38 @@ Authoritative references to align with (repo-local):
 - Baseline workflow YAML example: `qlib/examples/benchmarks/LightGBM/workflow_config_lightgbm_Alpha158.yaml`
 - Qlib runner behavior: `qlib/qlib/cli/run.py` (`uri_folder` controls `mlruns` location)
 
+## Data source policy: Bootstrap vs Live Ops (non-negotiable)
+
+### Bootstrap (Qlib validation only)
+- Use the official Qlib dataset (US 1d) **only** to prove:
+  - `qrun` works end-to-end in docker,
+  - artifacts are produced reproducibly under `/data/artifacts/.../qlib-shadow/<run_id>/`,
+  - ranked signals + backtest summary export works.
+- Bootstrap outputs MUST NOT drive trading decisions.
+
+### Live Ops (system-of-record)
+- The authoritative price history for the ops pipeline is **Postgres-backed EOD**:
+  - Table: `market_prices_eod`
+  - Populated by: `scripts/market_fetch_eod.py` at **08:00 UK**
+  - Evaluated by: deterministic data-quality gate at **08:00 UK**
+
+### Daily schedule mapping
+- **08:00 UK run** (Data + status):
+  - Fetch EOD (T-1 US trading day expected) → write to Postgres
+  - Run data-quality gate → write status report artifact
+  - Output: usually `NO-TRADE` status report
+
+- **14:00 UK run** (Trade decision):
+  - MUST NOT refetch market data
+  - Read the same stored Postgres EOD snapshot
+  - Run scoring (stub or Qlib) → deterministic riskguard → ticket
+
+### Adjusted close policy (v1)
+- If provider lacks adjusted close (e.g., Stooq daily CSV):
+  - Store `adj_close = close` (synthetic)
+  - Set `quality_flags.adj_close = "synthetic_close"`
+- This keeps schema consistent and allows later upgrade to true adjusted prices without breaking downstream consumers.
+
 ---
 
 ## Data & artifact paths (host ↔ container)

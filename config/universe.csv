@@ -1,8 +1,8 @@
 internal_symbol,stooq_symbol,yahoo_symbol,etoro_search_name,currency,instrument_type,tradable_underlying,enabled,notes
 AAPL,aapl.us,AAPL,AAPL,USD,stock,true,true,ETORO_VERIFIED_MICROTRADE_2025-12-22
 MU,mu.us,MU,MU,USD,stock,true,false,ETORO_HELD_SNAPSHOT_2025-12-22
-SPY,spy.us,SPY,SPY,USD,etf,false,false,BENCHMARK_ONLY_ETF_CFD_ONLY_ON_ETORO
-QQQ,qqq.us,QQQ,QQQ,USD,etf,false,false,BENCHMARK_ONLY_ETF_CFD_ONLY_ON_ETORO
+SPY,spy.us,SPY,SPY,USD,benchmark,false,false,BENCHMARK_ONLY_ETF_CFD_ONLY_ON_ETORO
+QQQ,qqq.us,QQQ,QQQ,USD,benchmark,false,false,BENCHMARK_ONLY_ETF_CFD_ONLY_ON_ETORO
 MSFT,msft.us,MSFT,MSFT,USD,stock,true,false,TODO_VERIFY_ETORO
 AMZN,amzn.us,AMZN,AMZN,USD,stock,true,false,TODO_VERIFY_ETORO
 GOOGL,googl.us,GOOGL,GOOGL,USD,stock,true,false,TODO_VERIFY_ETORO

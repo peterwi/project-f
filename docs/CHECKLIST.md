@@ -213,7 +213,32 @@ Non-negotiables (must remain true always):
 
 ## M6 — Deterministic gates + stub signals + riskguard
 
-- [ ] **M6.1 Deterministic data-quality gate blocks trading**
+- [x] M6.0a EOD ingestion writes adj_close for 100% rows
+  - Objective: Ensure `market_prices_eod.adj_close` is never empty for ingested providers (v1 uses synthetic close).
+  - Commands:
+      - make fetch-eod
+      - docker compose -f docker/compose.yml --env-file config/secrets.env exec -T postgres \
+        psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -tA -c \
+        "select count(*) from market_prices_eod where adj_close is null;"
+      - docker compose -f docker/compose.yml --env-file config/secrets.env exec -T postgres \
+        psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -tA -c \
+        "select quality_flags->>'adj_close' as adj_flag, count(*) from market_prices_eod group by 1 order by 2 desc;"
+  - Verification:
+      - First query returns `0`
+      - Second query shows `synthetic_close` for Stooq-loaded rows
+  - Artifacts:
+      - Raw snapshots under /data/trading-ops/data/raw/stooq/...
+
+- [x] M6.0b Universe fetch query is not over-inclusive
+  - Objective: Fetch only enabled symbols + explicit benchmarks/index (not every disabled non-stock).
+  - Commands:
+      - python scripts/market_fetch_eod.py --max-rows 5
+  - Verification:
+      - Output does not include unexpected disabled non-stock symbols (spot-check list vs config_universe)
+  - Artifacts:
+      - Console output + DB rows in market_prices_eod
+
+- [x] **M6.1 Deterministic data-quality gate blocks trading**
   - Objective: Enforce “NO DATA / NO TRADE” with stored report artifacts.
   - Commands:
     - `make data-quality`

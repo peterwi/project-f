@@ -95,8 +95,11 @@ def _load_fetch_universe() -> list[UniverseRow]:
         """
         select internal_symbol || '|' || coalesce(stooq_symbol,'') || '|' || lower(coalesce(instrument_type,''))
         from config_universe
-        where enabled = true
-           or lower(coalesce(instrument_type,'')) <> 'stock'
+        where
+          enabled = true
+          -- Allow fetching explicit benchmarks/index rows even if disabled,
+          -- but do NOT fetch every non-stock by accident.
+          or lower(coalesce(instrument_type,'')) in ('benchmark','index')
         order by internal_symbol
         """
     )
@@ -186,7 +189,9 @@ def main() -> int:
             raise RuntimeError(f"No rows parsed from Stooq for {row.internal_symbol} ({row.stooq_symbol})")
 
         keep = parsed[-args.max_rows :] if args.max_rows > 0 else parsed
-        quality_flags = _csv_escape('{"provider":"stooq","adj_close":"missing"}')
+        # Stooq daily CSV does not include adj_close. For v1 we set adj_close = close
+        # and mark it clearly; this keeps downstream schema consistent.
+        quality_flags = _csv_escape('{"provider":"stooq","adj_close":"synthetic_close"}')
         source = "stooq"
 
         for r in keep:
@@ -195,6 +200,7 @@ def main() -> int:
             high = _csv_escape(r.get("High", ""))
             low = _csv_escape(r.get("Low", ""))
             close = _csv_escape(r.get("Close", ""))
+            adj_close = close  # synthetic adj_close = close (v1)
             volume = _csv_escape(r.get("Volume", ""))
             all_price_rows.append(
                 [
@@ -204,7 +210,7 @@ def main() -> int:
                     high,
                     low,
                     close,
-                    "",  # adj_close missing from Stooq daily CSV
+                    adj_close,
                     volume,
                     _csv_escape(source),
                     quality_flags,

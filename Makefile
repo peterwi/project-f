@@ -23,6 +23,7 @@ help:
 	@echo "  make universe-import  # import config/universe.csv"
 	@echo "  make universe-validate # generate validation report"
 	@echo "  make market-fetch     # fetch EOD prices (Stooq)"
+	@echo "  make fetch-eod        # alias for market-fetch"
 	@echo "  make data-quality     # run data quality gate"
 	@echo "  make ledger-report    # write ledger report"
 	@echo "  make reconcile-add    # add reconciliation snapshot"
@@ -186,6 +187,9 @@ universe-validate:
 market-fetch:
 	@chmod +x scripts/market_fetch_eod.py
 	@python3 scripts/market_fetch_eod.py
+
+.PHONY: fetch-eod
+fetch-eod: market-fetch
 
 .PHONY: data-quality
 data-quality:

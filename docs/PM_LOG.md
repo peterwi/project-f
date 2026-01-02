@@ -208,3 +208,44 @@ This file is append-only. Each agent message appends a new entry so the project 
   - Execute `M6.1`
 - Blockers:
   - Docker socket access still requires escalated execution for this agent session.
+
+## 2026-01-02T14:45:03Z
+
+- Milestone / checklist: completed `M6.0a`, `M6.0b`, `M6.1`; next is `M6.2`
+- What changed:
+  - Updated: `scripts/market_fetch_eod.py` (avoid fetching disabled non-stocks; ensure `adj_close` always populated and flagged as synthetic)
+  - Updated: `docs/QLIB_DOCKER_EXECUTION_SPEC.md` (codified bootstrap vs live ops data policy + daily schedule + adj_close policy)
+  - Updated: `docs/CHECKLIST.md` (added `M6.0a`/`M6.0b`; marked `M6.0a`/`M6.0b`/`M6.1` as DONE)
+  - Updated: `Makefile` (added `fetch-eod` alias for `market-fetch`)
+  - Updated: `config/universe.csv` (set `SPY`/`QQQ` instrument_type to `benchmark` so they are explicitly fetchable)
+  - Updated: `docs/PM_STATE.md` (resume pointer advanced to `M6.2`)
+- Commands executed (high level):
+  - Apply prereqs:
+    - `make init-host-dirs` (created `/data/trading-ops/...` paths)
+    - `make migrate`
+    - `make universe-import`
+  - M6.0a:
+    - `make fetch-eod`
+    - `psql ... "select count(*) from market_prices_eod where adj_close is null;"`
+    - `psql ... "select quality_flags->>'adj_close' as adj_flag, count(*) ..."`
+  - M6.0b:
+    - `python scripts/market_fetch_eod.py --max-rows 5` (executed via shell re-parse since host lacks `python`)
+  - M6.1:
+    - `make data-quality`
+- Verification outputs (summary + paths):
+  - M6.0a:
+    - `adj_close is null` count: `0`
+    - `quality_flags->>'adj_close'` breakdown includes: `synthetic_close`
+    - Raw snapshots written under: `/data/trading-ops/data/raw/stooq/...`
+  - M6.0b:
+    - Fetch output includes only expected rows: `AAPL` (enabled) + `SPY`/`QQQ` (explicit `benchmark`)
+  - M6.1:
+    - Wrote report: `/data/trading-ops/artifacts/reports/data_quality_2026-01-01_20260102T144434Z.md`
+    - Printed: `DATA_QUALITY_FAIL` (expected-date logic does not infer US holidays at v1)
+- Result: PASS
+  - Why: EOD ingestion now enforces non-null `adj_close`; universe fetch is not over-inclusive; data-quality gate runs and writes a report (blocks trading on failure).
+- Next action:
+  - Execute `M6.2`
+- Blockers:
+  - Docker socket access still requires escalated execution for this agent session.
+  - Data-quality gate will require `--asof-date` overrides on US holidays (by design in v1).
