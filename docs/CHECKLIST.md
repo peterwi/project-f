@@ -134,7 +134,7 @@ Non-negotiables (must remain true always):
 - [x] **M3.1 Download US 1d dataset in container to `/data/qlib/...`**
   - Objective: Acquire Qlib’s US 1d dataset in the canonical docker runtime.
   - Commands:
-    - `docker compose -f docker/compose.yml run --rm qlib-runner python -m qlib.cli.data qlib_data --region us --interval 1d --target_dir /data/qlib/qlib_data/us_data_1d`
+    - `docker compose -f docker/compose.yml --env-file config/secrets.env run --rm qlib-runner python -m qlib.cli.data qlib_data --region us --interval 1d --target_dir /data/qlib/qlib_data/us_data_1d`
   - Verification:
     - Command exits 0 and dataset directory is populated.
   - Artifacts:
@@ -143,8 +143,8 @@ Non-negotiables (must remain true always):
 - [x] **M3.2 Verify dataset structure + instruments universe (no guessing)**
   - Objective: Confirm required subfolders exist and discover valid instrument universes.
   - Commands:
-    - `docker compose -f docker/compose.yml run --rm qlib-runner bash -lc "ls -la /data/qlib/qlib_data/us_data_1d | head -n 50"`
-    - `docker compose -f docker/compose.yml run --rm qlib-runner bash -lc "ls -la /data/qlib/qlib_data/us_data_1d/instruments | head -n 200"`
+    - `docker compose -f docker/compose.yml --env-file config/secrets.env run --rm qlib-runner bash -lc "ls -la /data/qlib/qlib_data/us_data_1d | head -n 50"`
+    - `docker compose -f docker/compose.yml --env-file config/secrets.env run --rm qlib-runner bash -lc "ls -la /data/qlib/qlib_data/us_data_1d/instruments | head -n 200"`
   - Verification:
     - `calendars/`, `features/`, `instruments/` exist.
     - At least one instruments file exists to use for `market`/`instruments` in the workflow YAML.
