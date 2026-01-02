@@ -623,3 +623,9 @@ This file is append-only. Each agent message appends a new entry so the project 
   - Removed stale blocker `openai_key_exposed_rotate_required` (RD-Agent audit succeeded and current runs sanitize logs).
   - Updated the existing audit run’s `VERIFY.md` to be more self-contained by annotating the git-status blocks with their source files:
     - `/data/trading-ops/artifacts/rd-agent/20260102-205555Z-rd-audit-gitab5e429/VERIFY.md`
+
+## 2026-01-02T21:20:35Z
+
+- Planning: next milestone proposal toward “daily automated trade instructions”
+- What changed:
+  - Added: `docs/NEXT_MILESTONE_PROPOSAL.md` (Options A/B/C + recommendation).
