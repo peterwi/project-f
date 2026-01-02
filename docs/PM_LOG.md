@@ -667,3 +667,18 @@ This file is append-only. Each agent message appends a new entry so the project 
     - Report shows weekday-expected `2026-01-01` and auto fallback `2025-12-31`.
 - Next action:
   - Execute `M10.B.7`: run `make run-1400` (no refetch) and confirm data-quality does not fail.
+
+## 2026-01-02T21:48:50Z
+
+- Milestone: `M10.B` (data quality)
+- Chunk: `M10.B.7`
+- Commands executed:
+  - `make run-1400`
+  - Inspect artifacts:
+    - `/data/trading-ops/artifacts/runs/85828a71-6dff-438f-afa0-ead2033e3692/run_summary.md`
+    - `/data/trading-ops/artifacts/reports/data_quality_2025-12-31_20260102T214740Z.md`
+- Result: PASS (no refetch; data-quality PASS)
+  - `run-1400` summary contains no `market-fetch` step.
+  - Data-quality report uses the same as-of date as 08:00 (`2025-12-31`) via deterministic holiday fallback.
+- Next action:
+  - Begin `M10.C.1` (inventory alert pipeline + DB delivery table).

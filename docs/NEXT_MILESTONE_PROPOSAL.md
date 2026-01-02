@@ -101,7 +101,7 @@ Pass definitions:
   - Done when:
     - Duplicate/conflict related failures are eliminated.
 
-- [ ] **M10.B.7 Prove 14:00 run does not refetch and still passes**
+- [x] **M10.B.7 Prove 14:00 run does not refetch and still passes**
   - Objective: Ensure `make run-1400` works without refetch and does not fail data-quality.
   - Commands:
     - `make run-0800`
