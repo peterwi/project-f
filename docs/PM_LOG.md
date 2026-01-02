@@ -682,3 +682,12 @@ This file is append-only. Each agent message appends a new entry so the project 
   - Data-quality report uses the same as-of date as 08:00 (`2025-12-31`) via deterministic holiday fallback.
 - Next action:
   - Begin `M10.C.1` (inventory alert pipeline + DB delivery table).
+
+## 2026-01-02T22:03:56Z
+
+- Milestone: `M10.C` (alerts delivery)
+- Item: `M10.C.1` inventory pass (DB migrations)
+- Commands executed:
+  - `make migrate` (applied `0004_alerts.sql` + `0005_alert_deliveries.sql`)
+  - `psql ... -c "\\d alert_deliveries"` (table present)
+- Result: PASS

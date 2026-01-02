@@ -118,7 +118,7 @@ Pass definitions:
 
 ## M10.C — Real secondary alert sink (enable delivery; file-only remains primary)
 
-- [ ] **M10.C.1 Inventory current alert pipeline + DB table**
+- [x] **M10.C.1 Inventory current alert pipeline + DB table**
   - Objective: Confirm existing alert scripts, delivery artifacts, and Postgres table `alert_deliveries` are present and reachable.
   - Commands:
     - `ls -la scripts | rg -n \"alert_(emit|deliver)\"`
