@@ -73,7 +73,7 @@ Run references (current known-good baseline):
 
 ## M11.2 Trade-builder implementation (deterministic; dry-run mode)
 
-- [ ] **M11.2.a Define trade-builder contract**
+- [x] **M11.2.a Define trade-builder contract**
   - Objective: Define deterministic inputs/outputs and safety constraints for trade building.
   - Commands:
     - Inspect existing tables: `portfolio_targets`, `ledger_cash_movements`, `ledger_trades_intended`, `market_prices_eod`
@@ -81,7 +81,8 @@ Run references (current known-good baseline):
   - Verification:
     - Contract explicitly states: no external calls; deterministic; no trading authority; produces intended trades only.
   - Artifacts:
-    - Spec doc under `docs/` (or embedded into an existing workflow doc).
+    - `docs/TRADE_BUILDER_CONTRACT.md`
+    - `docs/TRADE_BUILDER_CONTRACT.schema.json`
   - Done when:
     - Contract is written and agreed by checklist.
 

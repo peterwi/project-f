@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "TRADE_BUILDER_CONTRACT.schema.json",
+  "title": "Trade Builder Intended Trades",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "asof_date_used",
+    "base_currency",
+    "policy",
+    "prerequisites",
+    "result",
+    "intended_trades",
+    "determinism"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["v1"] },
+    "run_id": { "type": "string", "format": "uuid" },
+    "asof_date_used": { "type": "string", "format": "date" },
+    "base_currency": { "type": "string", "minLength": 1 },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min_notional_base", "default_order_type", "default_max_slippage_bps"],
+      "properties": {
+        "min_notional_base": { "type": "number", "minimum": 0 },
+        "default_order_type": { "type": "string", "minLength": 1 },
+        "default_max_slippage_bps": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "prerequisites": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reconciliation_passed", "targets_present", "prices_present"],
+      "properties": {
+        "reconciliation_passed": { "type": "boolean" },
+        "targets_present": { "type": "boolean" },
+        "prices_present": { "type": "boolean" },
+        "missing_prices": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trade_builder_ok", "reason"],
+      "properties": {
+        "trade_builder_ok": { "type": "boolean" },
+        "reason": { "type": "string" }
+      }
+    },
+    "intended_trades": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sequence", "internal_symbol", "side"],
+        "properties": {
+          "sequence": { "type": "integer", "minimum": 1 },
+          "internal_symbol": { "type": "string", "minLength": 1 },
+          "side": { "type": "string", "enum": ["BUY", "SELL"] },
+          "units": { "type": "number", "minimum": 0 },
+          "notional_value_base": { "type": "number" },
+          "order_type": { "type": "string" },
+          "limit_price": { "type": ["number", "null"] },
+          "reference_price": { "type": ["number", "null"] },
+          "max_slippage_bps": { "type": ["integer", "null"], "minimum": 0 },
+          "rationale": { "type": "string" }
+        }
+      }
+    },
+    "determinism": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["git_commit", "config_hash", "generated_at_utc"],
+      "properties": {
+        "git_commit": { "type": "string" },
+        "config_hash": { "type": "string" },
+        "generated_at_utc": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}
+

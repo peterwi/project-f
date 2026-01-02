@@ -711,3 +711,16 @@ This file is append-only. Each agent message appends a new entry so the project 
 - Result: PASS
 - Next action:
   - Start `M11.2.a` (define deterministic trade-builder contract).
+
+## 2026-01-02T22:37:36Z
+
+- Milestone: `M11.2` trade-builder (contract)
+- Item: `M11.2.a` define trade-builder contract
+- Commands executed:
+  - Inspected schema: `\d+ portfolio_targets`, `\d+ ledger_trades_intended`, `\d+ reconciliation_results`
+  - Wrote contract + machine schema:
+    - `docs/TRADE_BUILDER_CONTRACT.md`
+    - `docs/TRADE_BUILDER_CONTRACT.schema.json`
+- Result: PASS
+- Next action:
+  - Implement `M11.2.b` (deterministic trade_builder script + wire into `run-1400` behind `DRYRUN_TRADES=true`), using `reconciliation_results.passed=true` as the gate.
