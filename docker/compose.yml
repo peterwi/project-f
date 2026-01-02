@@ -37,4 +37,3 @@ services:
       - "/data/qlib:/data/qlib"
       - "/data/artifacts/trading-ops/qlib-shadow:/data/artifacts/trading-ops/qlib-shadow"
       - "..:/repo:ro"
-    entrypoint: ["/bin/bash", "-lc"]

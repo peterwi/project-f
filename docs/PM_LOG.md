@@ -96,3 +96,28 @@ This file is append-only. Each agent message appends a new entry so the project 
   - Execute `M2.2` (build `qlib-runner` image)
 - Blockers:
   - Docker build will require network access to fetch apt/pip deps (network is restricted; may require approval).
+
+## 2026-01-02T13:59:18Z
+
+- Milestone / checklist: completed `M2.2`, `M2.3`; next is `M3.1`
+- What changed:
+  - Updated: `docker/qlib-runner/Dockerfile` (fix Qlib install without upstream git metadata via `SETUPTOOLS_SCM_PRETEND_VERSION_FOR_PYQLIB`)
+  - Updated: `docker/compose.yml` (removed `qlib-runner` entrypoint override so `docker compose run ... qlib-runner <cmd>` behaves normally)
+  - Updated: `docs/CHECKLIST.md` (marked `M2.2` and `M2.3` as DONE; fixed compose commands to include `--env-file config/secrets.env`)
+  - Updated: `docs/QLIB_DOCKER_EXECUTION_SPEC.md` (documented setuptools-scm requirement + explicit shell usage)
+  - Updated: `docs/PM_STATE.md` (resume pointer advanced to `M3.1`)
+- Commands executed (high level):
+  - `docker compose ... build qlib-runner` (first failed due to missing `--env-file`; then succeeded)
+  - `docker image ls trading-ops/qlib-runner:local`
+  - `docker compose ... run --rm qlib-runner python -c "import qlib; ..."`
+  - `docker compose ... run --rm qlib-runner qrun --help`
+- Verification outputs (summary):
+  - Image built: `trading-ops/qlib-runner:local` (size ~2.75GB)
+  - Qlib import in container: prints `qlib_import_ok`
+  - `qrun --help` prints CLI help (supports `--experiment_name` and `--uri_folder`)
+- Result: PASS
+  - Why: docker-first Qlib runner now builds and runs; baseline CLI entrypoints verified.
+- Next action:
+  - Execute `M3.1` (download US 1d dataset into `/data/qlib/...` inside container)
+- Blockers:
+  - Docker socket access still requires escalated execution for this agent session.

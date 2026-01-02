@@ -17,8 +17,11 @@ RUN python -m pip install --upgrade pip wheel setuptools
 
 # Vendor Qlib into the image for reproducibility (repo provides ./qlib).
 COPY qlib /opt/qlib-src
-RUN python -m pip install -e /opt/qlib-src
+# Qlib uses setuptools-scm for versioning; our vendored copy intentionally does not
+# include git metadata. Provide a deterministic placeholder version at build time.
+ARG QLIB_VERSION=0.0.0+vendored
+ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_PYQLIB=${QLIB_VERSION}
+RUN python -m pip install /opt/qlib-src
 
 # Writable working dir even when running as a host UID/GID via compose.
 RUN mkdir -p /work && chmod 0777 /work
-

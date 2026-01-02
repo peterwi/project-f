@@ -67,12 +67,12 @@ Add this service to `docker/compose.yml` (alongside existing `postgres`).
       - "/data/artifacts/trading-ops/qlib-shadow:/data/artifacts/trading-ops/qlib-shadow"
       # Read-only repo mount for configs and version stamping (avoid running from repo root)
       - "..:/repo:ro"
-    entrypoint: ["/bin/bash", "-lc"]
 ```
 
 Notes:
 - We mount the repo read-only at `/repo` and run with `working_dir=/work` to avoid Qlib’s “don’t run from a directory containing `qlib`” footgun.
 - Postgres is intentionally **not** required for Qlib bootstrap (DB integration is a later milestone).
+- For multi-step commands, invoke an explicit shell, e.g. `docker compose ... run --rm qlib-runner bash -lc "<cmd>"`.
 
 ---
 
@@ -94,6 +94,10 @@ Recommended approach (local build, no external base image dependency):
 - `pip install -e /opt/qlib-src` (copy `qlib/` subtree into image)
 
 We will implement this Dockerfile in Milestone `M2`.
+
+Implementation note (repo vendoring):
+- The vendored `qlib/` subtree does not carry upstream git metadata, but Qlib uses `setuptools-scm` for version detection.
+- The Docker build must set `SETUPTOOLS_SCM_PRETEND_VERSION_FOR_PYQLIB` (we use a deterministic placeholder like `0.0.0+vendored`) so install succeeds.
 
 ---
 
@@ -166,4 +170,3 @@ One run is considered **PASS** when all of the following are true:
 Shadow-only guarantee:
 - No database writes are required for the golden run.
 - No ticketing, no execution, no trade decisions.
-

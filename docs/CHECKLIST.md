@@ -107,20 +107,20 @@ Non-negotiables (must remain true always):
     - `docker/qlib-runner/Dockerfile`
     - `docker/compose.yml` updated
 
-- [ ] **M2.2 Build qlib-runner image**
+- [x] **M2.2 Build qlib-runner image**
   - Objective: Build the local Qlib runner image.
   - Commands:
-    - `docker compose -f docker/compose.yml build qlib-runner`
+    - `docker compose -f docker/compose.yml --env-file config/secrets.env build qlib-runner`
   - Verification:
     - Build succeeds; image `trading-ops/qlib-runner:local` exists.
   - Artifacts:
     - Local Docker image: `trading-ops/qlib-runner:local`
 
-- [ ] **M2.3 Qlib import + qrun available in container**
+- [x] **M2.3 Qlib import + qrun available in container**
   - Objective: Ensure the container can import Qlib and run `qrun`.
   - Commands:
-    - `docker compose -f docker/compose.yml run --rm qlib-runner python -c "import qlib; print('qlib_import_ok')"`
-    - `docker compose -f docker/compose.yml run --rm qlib-runner qrun --help | head -n 40`
+    - `docker compose -f docker/compose.yml --env-file config/secrets.env run --rm qlib-runner python -c "import qlib; print('qlib_import_ok')"`
+    - `docker compose -f docker/compose.yml --env-file config/secrets.env run --rm qlib-runner qrun --help | head -n 40`
   - Verification:
     - Prints `qlib_import_ok`.
     - `qrun --help` prints usage (command exists).
