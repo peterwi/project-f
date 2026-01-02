@@ -131,7 +131,7 @@ Non-negotiables (must remain true always):
 
 ## M3 — Qlib dataset (download US 1d in container, persist on /data, verify)
 
-- [ ] **M3.1 Download US 1d dataset in container to `/data/qlib/...`**
+- [x] **M3.1 Download US 1d dataset in container to `/data/qlib/...`**
   - Objective: Acquire Qlib’s US 1d dataset in the canonical docker runtime.
   - Commands:
     - `docker compose -f docker/compose.yml run --rm qlib-runner python -m qlib.cli.data qlib_data --region us --interval 1d --target_dir /data/qlib/qlib_data/us_data_1d`
@@ -140,7 +140,7 @@ Non-negotiables (must remain true always):
   - Artifacts:
     - `/data/qlib/qlib_data/us_data_1d/`
 
-- [ ] **M3.2 Verify dataset structure + instruments universe (no guessing)**
+- [x] **M3.2 Verify dataset structure + instruments universe (no guessing)**
   - Objective: Confirm required subfolders exist and discover valid instrument universes.
   - Commands:
     - `docker compose -f docker/compose.yml run --rm qlib-runner bash -lc "ls -la /data/qlib/qlib_data/us_data_1d | head -n 50"`

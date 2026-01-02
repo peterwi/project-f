@@ -121,3 +121,27 @@ This file is append-only. Each agent message appends a new entry so the project 
   - Execute `M3.1` (download US 1d dataset into `/data/qlib/...` inside container)
 - Blockers:
   - Docker socket access still requires escalated execution for this agent session.
+
+## 2026-01-02T14:03:53Z
+
+- Milestone / checklist: completed `M3.1`, `M3.2`; next is `M4.1`
+- What changed:
+  - Updated: `docs/CHECKLIST.md` (marked `M3.1` and `M3.2` as DONE)
+  - Updated: `docs/PM_STATE.md` (resume pointer advanced to `M4.1`)
+- Commands executed (high level):
+  - `docker compose ... run --rm qlib-runner python -m qlib.cli.data qlib_data --region us --interval 1d --target_dir /data/qlib/qlib_data/us_data_1d`
+  - `ls -la /data/qlib/qlib_data/us_data_1d | head -n 50`
+  - `docker compose ... run --rm qlib-runner bash -lc "ls -la ..."`
+  - `docker compose ... run --rm qlib-runner bash -lc "ls -la .../instruments ..."`
+  - Benchmark discovery: `grep -n '^SPY\\b' .../instruments/all.txt`
+- Verification outputs (summary):
+  - Dataset created on host: `/data/qlib/qlib_data/us_data_1d/`
+  - Structure present: `calendars/`, `features/`, `instruments/`, and downloaded zip
+  - Available universes: `all.txt`, `nasdaq100.txt`, `sp500.txt`
+  - Benchmark symbol confirmed present in `all.txt`: `SPY` (date range shown in file)
+- Result: PASS
+  - Why: US dataset is downloaded and persistent; valid instrument universes discovered for workflow config.
+- Next action:
+  - Execute `M4.1` (create `config/qlib_shadow/workflow_us_lightgbm_alpha158_shadow.yaml`)
+- Blockers:
+  - Docker socket access still requires escalated execution for this agent session.
