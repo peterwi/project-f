@@ -17,7 +17,7 @@ Run references (current known-good baseline):
 
 ## M11.1 Universe readiness (benchmarks + enough symbols + ingest coverage)
 
-- [ ] **M11.1.a Confirm enabled universe and benchmark rows**
+- [x] **M11.1.a Confirm enabled universe and benchmark rows**
   - Objective: Ensure `config_universe` contains (1) enabled tradables and (2) benchmark rows (e.g. `SPY`, `QQQ`) for reporting/gates.
   - Commands:
     - `python scripts/universe_import.py`
@@ -31,7 +31,7 @@ Run references (current known-good baseline):
   - Done when:
     - Enabled + benchmark rows exist and validation passes.
 
-- [ ] **M11.1.b Prove market-fetch populates EOD bars for enabled + benchmarks**
+- [x] **M11.1.b Prove market-fetch populates EOD bars for enabled + benchmarks**
   - Objective: Ensure `make market-fetch` writes rows into `market_prices_eod` for enabled symbols and benchmarks.
   - Commands:
     - `make market-fetch`
@@ -44,7 +44,7 @@ Run references (current known-good baseline):
   - Done when:
     - EOD bars exist for enabled + benchmarks in Postgres.
 
-- [ ] **M11.1.c Ensure data-quality PASS with current universe**
+- [x] **M11.1.c Ensure data-quality PASS with current universe**
   - Objective: Ensure the deterministic gate passes with the enabled universe and benchmarks.
   - Commands:
     - `make run-0800`
@@ -56,6 +56,18 @@ Run references (current known-good baseline):
     - `/data/trading-ops/artifacts/runs/<run_id>/run_summary.md`
   - Done when:
     - Data-quality PASS and runs complete without refetch at 14:00.
+
+- [x] **M11.1.d Schema-safe DB verification queries (no `run_label` / `tickets.asof_date`)**
+  - Objective: Provide stable, schema-correct verification commands so the pipeline is never blocked by mismatched column names.
+  - Commands:
+    - `make runs-last`
+    - `make tickets-last`
+  - Verification:
+    - Commands succeed and print recent runs/tickets without SQL errors.
+  - Artifacts:
+    - None (read-only DB queries).
+  - Done when:
+    - `make runs-last` and `make tickets-last` succeed in the current schema.
 
 ---
 

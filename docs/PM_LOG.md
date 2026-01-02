@@ -696,3 +696,18 @@ This file is append-only. Each agent message appends a new entry so the project 
 
 - Note: /data remounted onto /dev/sdc1 (XFS); ownership policy updated (artifacts/data/backups peter:docker g+rwX; postgres-data 70:70 chmod 700); Docker restarted and is healthy.
 - Decision: Alerting deferred (nice-to-have). Focus shifted to M11 (trade ticket workflow).
+
+## 2026-01-02T22:25:00Z
+
+- Milestone: `M11.1` universe readiness (and schema-safe verification)
+- What changed:
+  - Refreshed EOD data via `make market-fetch` and confirmed `market_prices_eod` max trading date for `AAPL/QQQ/SPY` is now `2026-01-02`.
+  - Ran `make run-1400` and produced a deterministic ticket (still `NO_TRADE` until trade-builder exists):
+    - Run: `/data/trading-ops/artifacts/runs/f347c47b-4c23-453b-80b6-30566bbca2b7/run_summary.md`
+    - Ticket: `/data/trading-ops/artifacts/tickets/9c9d74bd-3ff7-5cf2-828b-842a7f6bc787/ticket.md`
+  - Added schema-safe Make targets to avoid DB column mismatches:
+    - `make runs-last`
+    - `make tickets-last`
+- Result: PASS
+- Next action:
+  - Start `M11.2.a` (define deterministic trade-builder contract).

@@ -38,6 +38,8 @@ help:
 	@echo "  make run-0800         # scheduled 08:00 UK pipeline run"
 	@echo "  make run-1400         # scheduled 14:00 UK pipeline run (NO refetch)"
 	@echo "  make alerts-last      # print last 20 alerts"
+	@echo "  make runs-last        # print last 5 runs (DB schema-safe)"
+	@echo "  make tickets-last     # print last 5 tickets (DB schema-safe)"
 
 .PHONY: init-host-dirs
 init-host-dirs:
@@ -278,6 +280,22 @@ alerts-last:
 	echo ""; \
 	echo "Latest alert dir:"; \
 	ls -1dt /data/trading-ops/artifacts/alerts/* 2>/dev/null | head -n 1 || true
+
+.PHONY: runs-last
+runs-last:
+	@set -euo pipefail; \
+	set -a; source "$(ENV_FILE)"; set +a; \
+	docker compose -f "$(COMPOSE_FILE)" --env-file "$(ENV_FILE)" exec -T postgres \
+	  psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+	  "select run_id, created_at, cadence, status, asof_date, git_commit, coalesce(notes,'') as notes from runs order by created_at desc limit 5;"
+
+.PHONY: tickets-last
+tickets-last:
+	@set -euo pipefail; \
+	set -a; source "$(ENV_FILE)"; set +a; \
+	docker compose -f "$(COMPOSE_FILE)" --env-file "$(ENV_FILE)" exec -T postgres \
+	  psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+	  "select t.ticket_id, t.created_at, t.status, t.ticket_type, t.run_id, coalesce((t.rendered_json->>'asof_date')::date, r.asof_date) as asof_date from tickets t join runs r on r.run_id=t.run_id order by t.created_at desc limit 5;"
 
 # Allow passing CLI args via extra MAKECMDGOALS, e.g.:
 #   make reconcile-add -- --snapshot-date 2025-12-22 --cash-gbp 25.88 --position AAPL=0.1
