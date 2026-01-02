@@ -585,3 +585,32 @@ This file is append-only. Each agent message appends a new entry so the project 
   - `/data/trading-ops/artifacts/rd-agent/20260102-203514Z-rd-audit-git4bd228a/git_status_worktree_after.txt`
 - Result: PASS
   - Why: `outputs.md` exists; both main repo and worktree `git status --porcelain=v1` were clean before/after; no secrets were logged.
+
+## 2026-01-02T20:53:43Z
+
+- Milestone / checklist: completed `M9.3` (RD-Agent audit pack runner); next is `END`
+- What changed:
+  - Added: `scripts/rd_agent_audit.sh` (one-shot audit pack runner; isolated `git worktree`; writes artifacts under `/data`).
+  - Added: `docs/RD_AGENT_AUDIT_ONESHOT.md` (single-command instructions + troubleshooting).
+  - Ran the audit pack and produced artifacts under:
+    - `/data/trading-ops/artifacts/rd-agent/20260102-205238Z-rd-audit-gitfda87db/`
+- Verification (paths):
+  - `outputs.md` exists:
+    - `/data/trading-ops/artifacts/rd-agent/20260102-205238Z-rd-audit-gitfda87db/outputs.md`
+  - “No repo writes” proof captured:
+    - `/data/trading-ops/artifacts/rd-agent/20260102-205238Z-rd-audit-gitfda87db/VERIFY.md`
+
+## 2026-01-02T20:56:26Z
+
+- Milestone / checklist: `M9.3` follow-up re-run (confirm quiet output + non-empty run.log)
+- What changed:
+  - Re-ran `bash scripts/rd_agent_audit.sh` and confirmed it prints only `RD_AGENT_RUN_ID=...` and `OUT=...` (no extra `git worktree` noise).
+  - Produced artifacts under:
+    - `/data/trading-ops/artifacts/rd-agent/20260102-205555Z-rd-audit-gitab5e429/`
+- Verification (paths):
+  - `outputs.md` exists:
+    - `/data/trading-ops/artifacts/rd-agent/20260102-205555Z-rd-audit-gitab5e429/outputs.md`
+  - `run.log` exists:
+    - `/data/trading-ops/artifacts/rd-agent/20260102-205555Z-rd-audit-gitab5e429/run.log`
+  - “No repo writes” proof captured:
+    - `/data/trading-ops/artifacts/rd-agent/20260102-205555Z-rd-audit-gitab5e429/VERIFY.md`

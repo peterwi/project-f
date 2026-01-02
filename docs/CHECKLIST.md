@@ -400,15 +400,25 @@ Non-negotiables (must remain true always):
   - Artifacts:
     - `/data/trading-ops/artifacts/rd-agent/<run_id>/outputs.md`
     - `/data/trading-ops/artifacts/rd-agent/<run_id>/patch.diff` (optional)
-- [ ] **M9.3 Allow RD-Agent to propose one patch and validate via checklist**
-  - Objective: Run the full workflow: proposal → human review → apply → verify → log.
+- [x] **M9.3 RD-Agent audit pack runner (propose patch; no repo writes)**
+  - Objective: Provide a repeatable “audit pack” command that can propose changes as a diff, but never modifies the repo.
   - Commands:
-    - (to be implemented when RD-Agent is installed locally)
+    - Run audit pack (writes artifacts under `/data` and prints the OUT dir):
+      - `bash scripts/rd_agent_audit.sh`
+    - Optional overrides:
+      - `RD_AGENT_MODEL=gpt-4o-mini bash scripts/rd_agent_audit.sh`
+      - `RD_AGENT_MAX_TOKENS=1100 bash scripts/rd_agent_audit.sh`
   - Verification:
-    - Patch is applied manually and verification commands for the target checklist item(s) pass.
+    - Script prints `OUT=...` and `RD_AGENT_RUN_ID=...`.
+    - `outputs.md` and `VERIFY.md` exist under the printed `OUT`.
+    - `OUT/VERIFY.md` shows empty `git status --porcelain=v1` for both main repo and worktree (before/after).
   - Artifacts:
-    - `/data/trading-ops/artifacts/rd-agent/<run_id>/patch.diff`
-    - `docs/PM_LOG.md` entry with verification outputs
+    - `/data/trading-ops/artifacts/rd-agent/<run_id>/outputs.md`
+    - `/data/trading-ops/artifacts/rd-agent/<run_id>/run.log`
+    - `/data/trading-ops/artifacts/rd-agent/<run_id>/VERIFY.md`
+    - `/data/trading-ops/artifacts/rd-agent/<run_id>/patch.diff` (optional)
+    - `docs/RD_AGENT_AUDIT_ONESHOT.md`
+    - `docs/PM_LOG.md` entry with run_id + OUT path
 
 ### Future (not built in M9.1)
 
