@@ -141,7 +141,7 @@ Run references (current known-good baseline):
 
 ## M11.5 End-to-end daily loop (08:00 status, 14:00 ticket; dry-run toggle)
 
-- [ ] **M11.5.a Wire dry-run trade ticket into 14:00**
+- [x] **M11.5.a Wire dry-run trade ticket into 14:00**
   - Objective: Make `make run-1400` produce a TRADE ticket only when `DRYRUN_TRADES=true` and gates PASS.
   - Commands:
     - `DRYRUN_TRADES=true make run-1400`

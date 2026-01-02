@@ -216,7 +216,7 @@ def main() -> int:
             reconcile_detail["status"] = "missing"
         else:
             passed_s, report_path = last_rec.split("|", 1)
-            reconcile_ok = passed_s == "t"
+            reconcile_ok = passed_s.strip().lower() in ("t", "true", "1", "yes")
             reconcile_detail["status"] = "present"
             reconcile_detail["passed"] = reconcile_ok
             reconcile_detail["report_path"] = report_path
