@@ -229,16 +229,21 @@ def main() -> int:
             )
     risk_checks.append(("reconciliation", reconcile_ok, reconcile_detail))
 
-    latest_ticket = _psql_capture("select coalesce(ticket_id::text,'') from tickets order by created_at desc limit 1;")
+    latest_ticket_row = _psql_capture(
+        "select coalesce(ticket_id::text,'') || '|' || coalesce(ticket_type,'') from tickets order by created_at desc limit 1;"
+    )
+    latest_ticket, latest_ticket_type = ("", "")
+    if latest_ticket_row:
+        latest_ticket, latest_ticket_type = latest_ticket_row.split("|", 1)
     confirm_ok = True
-    confirm_detail: dict = {"latest_ticket_id": latest_ticket or None}
-    if latest_ticket:
+    confirm_detail: dict = {"latest_ticket_id": (latest_ticket or None), "latest_ticket_type": (latest_ticket_type or None)}
+    if latest_ticket and latest_ticket_type == "TRADE":
         intended_count = int(_psql_capture(f"select count(*) from ledger_trades_intended where ticket_id = '{latest_ticket}';") or "0")
         confirmed_fills = int(_psql_capture(f"select count(*) from ledger_trades_fills where ticket_id = '{latest_ticket}';") or "0")
         confirm_detail.update({"intended_count": intended_count, "fills_count": confirmed_fills})
         if intended_count > 0 and confirmed_fills < intended_count:
             confirm_ok = False
-            reasons.append({"code": "CONFIRMATION_MISSING", "detail": "Previous ticket has missing confirmations/fills."})
+            reasons.append({"code": "CONFIRMATION_MISSING", "detail": "Previous TRADE ticket has missing fills."})
     risk_checks.append(("confirmations", confirm_ok, confirm_detail))
 
     unverified_enabled = int(

@@ -147,6 +147,70 @@ def _load_ticket_payload(ticket_id: str) -> dict:
     return json.loads(ticket_json.read_text(encoding="utf-8"))
 
 
+def _load_fills(path: Path) -> list[dict]:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(raw, list):
+        fills = raw
+    elif isinstance(raw, dict) and isinstance(raw.get("fills"), list):
+        fills = raw["fills"]
+    else:
+        raise ValueError("fills JSON must be a list or an object with a top-level 'fills' list")
+
+    out: list[dict] = []
+    for i, f in enumerate(fills):
+        if not isinstance(f, dict):
+            raise ValueError(f"fills[{i}] must be an object")
+
+        seq = f.get("sequence")
+        sym = f.get("internal_symbol")
+        side = str(f.get("side") or "").upper().strip()
+        status = str(f.get("executed_status") or "").upper().strip()
+        if not isinstance(seq, int) or seq < 1:
+            raise ValueError(f"fills[{i}].sequence must be int >= 1")
+        if not isinstance(sym, str) or not sym.strip():
+            raise ValueError(f"fills[{i}].internal_symbol must be non-empty string")
+        if side not in ("BUY", "SELL"):
+            raise ValueError(f"fills[{i}].side must be BUY or SELL")
+        if status not in ("DONE", "SKIPPED", "FAILED", "PARTIAL"):
+            raise ValueError(f"fills[{i}].executed_status must be DONE|SKIPPED|FAILED|PARTIAL")
+
+        executed_value_base = f.get("executed_value_base", None)
+        units = f.get("units", None)
+        fill_price = f.get("fill_price", None)
+        filled_at = str(f.get("filled_at") or "").strip()
+        notes = str(f.get("notes") or "").strip()
+
+        if executed_value_base is None and units is not None and fill_price is not None:
+            executed_value_base = float(units) * float(fill_price)
+        if executed_value_base is not None and float(executed_value_base) < 0:
+            raise ValueError(f"fills[{i}].executed_value_base must be >= 0 (store magnitude; side encodes direction)")
+        if units is not None and float(units) < 0:
+            raise ValueError(f"fills[{i}].units must be >= 0")
+        if fill_price is not None and float(fill_price) < 0:
+            raise ValueError(f"fills[{i}].fill_price must be >= 0")
+        if status in ("DONE", "PARTIAL") and filled_at:
+            # Basic ISO-8601 sanity: allow "Z" suffix.
+            if "T" not in filled_at:
+                raise ValueError(f"fills[{i}].filled_at must be ISO-8601 datetime (got {filled_at!r})")
+
+        out.append(
+            {
+                "sequence": int(seq),
+                "internal_symbol": sym.strip(),
+                "side": side,
+                "executed_status": status,
+                "executed_value_base": (float(executed_value_base) if executed_value_base is not None else None),
+                "units": (float(units) if units is not None else None),
+                "fill_price": (float(fill_price) if fill_price is not None else None),
+                "filled_at": (filled_at if filled_at else None),
+                "notes": (notes if notes else None),
+            }
+        )
+
+    out.sort(key=lambda r: int(r["sequence"]))
+    return out
+
+
 def _render_confirmation_md(payload: dict) -> str:
     lines: list[str] = []
     lines.append("# Confirmation Submission")
@@ -175,10 +239,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Submit a deterministic confirmation payload for a ticket.")
     parser.add_argument("--ticket-id", help="Target ticket_id (uuid). Defaults to LAST_TICKET_ID in docs/PM_STATE.md.")
     parser.add_argument("--run-id", help="Alternative lookup by run_id (uuid).")
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument(
         "--ack-no-trade",
         action="store_true",
         help="Acknowledge a NO-TRADE ticket (no eToro automation; no fills).",
+    )
+    mode.add_argument("--fills-json", help="Path to a fills JSON file (writes into ledger_trades_fills).")
+    parser.add_argument(
+        "--allow-non-trade-ticket",
+        action="store_true",
+        help="Allow submitting fills even if ticket decision_type is not TRADE (testing only).",
     )
     parser.add_argument("--submitted-by", default="operator", help="Human identifier (free text).")
     parser.add_argument("--notes", default="", help="Optional notes.")
@@ -193,8 +264,8 @@ def main() -> int:
     decision_type = str(ticket.get("decision_type") or "")
     if args.ack_no_trade and decision_type != "NO_TRADE":
         raise RuntimeError(f"--ack-no-trade requires ticket decision_type=NO_TRADE (got {decision_type!r})")
-    if not args.ack_no_trade:
-        raise RuntimeError("Only --ack-no-trade is supported in v1 (trade confirmations come later).")
+    if args.fills_json and decision_type != "TRADE" and not args.allow_non_trade_ticket:
+        raise RuntimeError(f"--fills-json requires ticket decision_type=TRADE (got {decision_type!r})")
 
     created_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     confirmation_uuid = str(uuid.uuid4())
@@ -203,9 +274,19 @@ def main() -> int:
     conf_dir = ticket_dir / "confirmations" / confirmation_uuid
     conf_dir.mkdir(parents=True, exist_ok=True)
 
+    fills: list[dict] = []
+    confirmation_type = "ACK_NO_TRADE"
+    fills_path: Path | None = None
+    if args.fills_json:
+        confirmation_type = "TRADE_FILLS"
+        fills_path = Path(args.fills_json).expanduser()
+        if not fills_path.exists():
+            raise FileNotFoundError(f"Missing fills JSON: {fills_path}")
+        fills = _load_fills(fills_path)
+
     payload = {
         "confirmation_uuid": confirmation_uuid,
-        "confirmation_type": "ACK_NO_TRADE",
+        "confirmation_type": confirmation_type,
         "ticket_id": ticket_id,
         "run_id": str(ticket.get("run_id") or ""),
         "asof_date": str(ticket.get("asof_date") or ""),
@@ -213,11 +294,12 @@ def main() -> int:
         "submitted_by": args.submitted_by,
         "notes": args.notes,
         "acknowledged": True,
-        "fills": [],
+        "fills": fills,
         "pointers": {
             "ticket_json": str(ticket_dir / "ticket.json"),
             "ticket_md": str(ticket_dir / "ticket.md"),
             "confirmation_dir": str(conf_dir),
+            "fills_json": (str(fills_path) if fills_path else ""),
         },
     }
 
@@ -234,10 +316,52 @@ def main() -> int:
         {"confirmation_uuid": confirmation_uuid, "confirmation_dir": str(conf_dir), "ticket_id": ticket_id}
     ).replace("'", "''")
 
+    fills_sql_lines: list[str] = []
+    for f in fills:
+        seq = int(f["sequence"])
+        sym = str(f["internal_symbol"]).replace("'", "''")
+        side = str(f["side"])
+        executed_status = str(f["executed_status"])
+        executed_value_base = f.get("executed_value_base", None)
+        units = f.get("units", None)
+        fill_price = f.get("fill_price", None)
+        filled_at = f.get("filled_at", None)
+        notes = f.get("notes", None)
+
+        executed_value_sql = "null" if executed_value_base is None else str(float(executed_value_base))
+        units_sql = "null" if units is None else str(float(units))
+        fill_price_sql = "null" if fill_price is None else str(float(fill_price))
+        filled_at_sql = "null" if not filled_at else "'" + str(filled_at).replace("'", "''") + "'::timestamptz"
+        notes_sql = "null" if not notes else "'" + str(notes).replace("'", "''") + "'"
+
+        fills_sql_lines.append(
+            f"""
+            insert into ledger_trades_fills(
+              ticket_id, sequence, internal_symbol, side,
+              executed_status, executed_value_base, units, fill_price, filled_at, notes
+            )
+            values (
+              '{ticket_id}'::uuid, {seq}, '{sym}', '{side}',
+              '{executed_status}', {executed_value_sql}, {units_sql}, {fill_price_sql}, {filled_at_sql}, {notes_sql}
+            )
+            on conflict (ticket_id, sequence) do update set
+              internal_symbol = excluded.internal_symbol,
+              side = excluded.side,
+              executed_status = excluded.executed_status,
+              executed_value_base = excluded.executed_value_base,
+              units = excluded.units,
+              fill_price = excluded.fill_price,
+              filled_at = excluded.filled_at,
+              notes = excluded.notes;
+            """.strip()
+        )
+
     sql = f"""
     begin;
     insert into confirmations(ticket_id, submitted_by, payload)
     values ('{ticket_id}'::uuid, {submitted_by_sql}, {payload_dq}{payload_str}{payload_dq}::jsonb);
+
+    {'\n'.join(fills_sql_lines) if fills_sql_lines else ''}
 
     insert into audit_log(ticket_id, actor, action, object_type, object_id, details)
     values (
@@ -267,4 +391,3 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
         raise SystemExit(2)
-

@@ -146,6 +146,21 @@ def main() -> int:
     conf_count = int(_psql_capture(f"select count(*) from confirmations where ticket_id = '{ticket_id}'::uuid;") or "0")
     ok = conf_count > 0
 
+    last_conf = _psql_capture(
+        f"""
+        select
+          coalesce(payload->>'confirmation_type','') || '|' ||
+          coalesce(jsonb_array_length(coalesce(payload->'fills','[]'::jsonb))::text,'0')
+        from confirmations
+        where ticket_id = '{ticket_id}'::uuid
+        order by created_at desc
+        limit 1;
+        """
+    )
+    last_conf_type, last_conf_fills = ("", "0")
+    if last_conf:
+        last_conf_type, last_conf_fills = last_conf.split("|", 1)
+
     details = {
         "evaluated_at_utc": now_utc,
         "previous_ticket_id": ticket_id,
@@ -153,6 +168,8 @@ def main() -> int:
         "previous_ticket_created_utc": prev_created_utc,
         "previous_run_id": prev_run_id,
         "confirmations_count": conf_count,
+        "latest_confirmation_type": last_conf_type,
+        "latest_confirmation_fills_count": int(last_conf_fills or "0"),
         "rule": "previous ticket must have >=1 confirmation by start of 14:00 run",
     }
 
@@ -182,4 +199,3 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
         raise SystemExit(2)
-

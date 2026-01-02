@@ -760,3 +760,27 @@ This file is append-only. Each agent message appends a new entry so the project 
 - Result: PASS (ticket renders draft intended trades; DECISION remains `NO_TRADE` until reconciliation passes)
 - Next action:
   - Start `M11.4.a` (confirmation payload → `ledger_trades_fills`).
+
+## 2026-01-02T23:06:08Z
+
+- Milestone: `M11.4` confirmations → ledger fills
+- Item: `M11.4.a` capture fills into `ledger_trades_fills`
+- What changed:
+  - Extended `scripts/confirmations_submit.py`:
+    - New `--fills-json` mode (deterministic validation + confirmation artifacts + DB writes).
+  - Updated `scripts/ticket_render.py`:
+    - Links `ledger_trades_intended.ticket_id` for the run after ticket upsert.
+    - Renders “Confirmed fills” section when fills exist.
+  - Updated `scripts/riskguard_run.py` confirmation gating:
+    - Only enforces fill-count matching for previous `TRADE` tickets (does not block on NO_TRADE tickets).
+  - Updated `scripts/confirmation_gate.py` details to include latest confirmation type + fills count.
+  - Added `make confirm-fills` target.
+- Verification (synthetic, deterministic):
+  - Ticket: `/data/trading-ops/artifacts/tickets/810d0aa8-1d18-5680-839d-13933a8604d1/ticket.md`
+  - Confirmation: `/data/trading-ops/artifacts/tickets/810d0aa8-1d18-5680-839d-13933a8604d1/confirmations/841add88-9c6d-47b6-b2f9-0361c149e0b8/confirmation.json`
+  - DB:
+    - `confirmations` row exists for `ticket_id=810d0aa8-1d18-5680-839d-13933a8604d1`
+    - `ledger_trades_fills` row exists for `ticket_id=810d0aa8-1d18-5680-839d-13933a8604d1`
+- Result: PASS
+- Next action:
+  - Start `M11.5.a` (daily loop: allow TRADE ticket in dry-run mode only when gates PASS).

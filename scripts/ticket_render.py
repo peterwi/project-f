@@ -218,6 +218,42 @@ def _universe_counts() -> dict[str, int]:
     )
     return {"enabled_count": enabled, "benchmark_count": benchmarks, "total_count": enabled + benchmarks}
 
+def _load_confirmed_fills(ticket_id: str) -> list[dict]:
+    raw = _psql_capture(
+        f"""
+        select
+          sequence::text || '|' ||
+          internal_symbol || '|' ||
+          coalesce(side,'') || '|' ||
+          executed_status || '|' ||
+          coalesce(executed_value_base::text,'') || '|' ||
+          coalesce(units::text,'') || '|' ||
+          coalesce(fill_price::text,'') || '|' ||
+          coalesce(to_char(filled_at at time zone 'utc','YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),'') || '|' ||
+          coalesce(notes,'')
+        from ledger_trades_fills
+        where ticket_id = '{ticket_id}'::uuid
+        order by sequence;
+        """
+    )
+    fills: list[dict] = []
+    for line in (raw.splitlines() if raw else []):
+        seq_s, sym, side, status, value_s, units_s, px_s, filled_at, notes = line.split("|", 8)
+        fills.append(
+            {
+                "sequence": int(seq_s),
+                "internal_symbol": sym,
+                "side": side,
+                "executed_status": status,
+                "executed_value_base": (float(value_s) if value_s else None),
+                "units": (float(units_s) if units_s else None),
+                "fill_price": (float(px_s) if px_s else None),
+                "filled_at": (filled_at if filled_at else None),
+                "notes": (notes if notes else None),
+            }
+        )
+    return fills
+
 
 def _parse_run_summary_steps(path: Path) -> dict[str, str]:
     """
@@ -257,6 +293,7 @@ def _render_ticket_md(payload: dict) -> str:
     reasons_json = json.dumps(payload.get("blocking_reasons", []), indent=2)
     gate_statuses_json = json.dumps(payload.get("gate_statuses", {}), indent=2)
     intended_trades = payload.get("intended_trades") or []
+    confirmed_fills = payload.get("confirmed_fills") or []
 
     lines: list[str] = []
     lines.append("# Trade Ticket")
@@ -335,7 +372,62 @@ def _render_ticket_md(payload: dict) -> str:
         lines.append(reasons_json)
         lines.append("```")
         lines.append("")
+        if confirmed_fills:
+            lines.append("## Confirmed fills (recorded)")
+            lines.append("")
+            lines.append("Fills were recorded for this ticket. Ensure this is intended; NO-TRADE normally implies no execution.")
+            lines.append("")
+            for f in confirmed_fills:
+                side = str(f.get("side", "")).upper()
+                sym = str(f.get("internal_symbol", ""))
+                status = str(f.get("executed_status", ""))
+                units = f.get("units", None)
+                value = f.get("executed_value_base", None)
+                px = f.get("fill_price", None)
+                filled_at = f.get("filled_at", None)
+                units_s = (f"{units:g}" if isinstance(units, (int, float)) else str(units)) if units is not None else ""
+                value_s = (f"{float(value):.2f}" if isinstance(value, (int, float)) else str(value)) if value is not None else ""
+                px_s = (f"{float(px):.4f}" if isinstance(px, (int, float)) else str(px)) if px is not None else ""
+                at_s = str(filled_at or "")
+                parts = [status, side, sym]
+                if units_s:
+                    parts.append(f"units={units_s}")
+                if value_s:
+                    parts.append(f"value={payload.get('base_currency','GBP')}{value_s}")
+                if px_s:
+                    parts.append(f"px={px_s}")
+                if at_s:
+                    parts.append(f"at={at_s}")
+                lines.append(f"- {' '.join(parts)}")
+            lines.append("")
         return "\n".join(lines)
+
+    if confirmed_fills:
+        lines.append("## Confirmed fills")
+        lines.append("")
+        for f in confirmed_fills:
+            side = str(f.get("side", "")).upper()
+            sym = str(f.get("internal_symbol", ""))
+            status = str(f.get("executed_status", ""))
+            units = f.get("units", None)
+            value = f.get("executed_value_base", None)
+            px = f.get("fill_price", None)
+            filled_at = f.get("filled_at", None)
+            units_s = (f"{units:g}" if isinstance(units, (int, float)) else str(units)) if units is not None else ""
+            value_s = (f"{float(value):.2f}" if isinstance(value, (int, float)) else str(value)) if value is not None else ""
+            px_s = (f"{float(px):.4f}" if isinstance(px, (int, float)) else str(px)) if px is not None else ""
+            at_s = str(filled_at or "")
+            parts = [status, side, sym]
+            if units_s:
+                parts.append(f"units={units_s}")
+            if value_s:
+                parts.append(f"value={payload.get('base_currency','GBP')}{value_s}")
+            if px_s:
+                parts.append(f"px={px_s}")
+            if at_s:
+                parts.append(f"at={at_s}")
+            lines.append(f"- {' '.join(parts)}")
+        lines.append("")
 
     lines.append("## TRADE")
     lines.append("")
@@ -425,6 +517,7 @@ def main() -> int:
         "gate_statuses": gate_statuses,
         "blocking_reasons": blocking_reasons,
         "intended_trades": intended_trades,
+        "confirmed_fills": [],
         "git_commit": run_meta.get("git_commit", ""),
         "config_hash": run_meta.get("config_hash", ""),
         "artifact_paths": artifact_paths,
@@ -464,6 +557,20 @@ def main() -> int:
       rendered_json = excluded.rendered_json;
     """
     _psql_exec(sql)
+
+    # Link intended trades to the ticket_id (enables deterministic confirmation gating + fill matching).
+    _psql_exec(
+        f"""
+        update ledger_trades_intended
+        set ticket_id = '{ticket_id}'::uuid
+        where run_id = '{run_id}'::uuid
+          and (ticket_id is null or ticket_id <> '{ticket_id}'::uuid);
+        """
+    )
+
+    payload["confirmed_fills"] = _load_confirmed_fills(ticket_id)
+    ticket_json_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    ticket_md_path.write_text(_render_ticket_md(payload), encoding="utf-8")
 
     print(f"ticket_id={ticket_id}")
     print(f"run_id={run_id}")

@@ -272,6 +272,16 @@ confirm:
 	@set -euo pipefail; \
 	python3 scripts/confirmations_submit.py --ack-no-trade
 
+.PHONY: confirm-fills
+confirm-fills:
+	@chmod +x scripts/confirmations_submit.py
+	@set -euo pipefail; \
+	if [[ -z "$${FILLS_JSON:-}" ]]; then \
+	  echo "FILLS_JSON is required (path to fills JSON)"; \
+	  exit 2; \
+	fi; \
+	python3 scripts/confirmations_submit.py --fills-json "$$FILLS_JSON" $(filter-out $@,$(MAKECMDGOALS))
+
 .PHONY: run-0800
 run-0800:
 	@python3 scripts/run_scheduled.py --cadence 0800
@@ -310,7 +320,7 @@ tickets-last:
 # Allow passing CLI args via extra MAKECMDGOALS, e.g.:
 #   make reconcile-add -- --snapshot-date 2025-12-22 --cash-gbp 25.88 --position AAPL=0.1
 # Only enabled when one of these targets is present to avoid masking typos.
-PASSTHRU_TARGETS := reconcile-add reconcile-run stub-signals riskguard
+PASSTHRU_TARGETS := reconcile-add reconcile-run stub-signals riskguard confirm-fills
 ifneq (,$(filter $(PASSTHRU_TARGETS),$(MAKECMDGOALS)))
 %:
 	@:

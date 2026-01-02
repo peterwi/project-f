@@ -120,15 +120,20 @@ Run references (current known-good baseline):
 
 ## M11.4 Confirmation capture for TRADE (fills → ledger_trades_fills)
 
-- [ ] **M11.4.a Extend confirmation payload to capture fills**
+- [x] **M11.4.a Extend confirmation payload to capture fills**
   - Objective: Capture executed fills (units/value, price, timestamp) and persist into `ledger_trades_fills`.
   - Commands:
-    - Extend confirmation script to accept fill details and validate deterministically.
+    - Submit fills (writes confirmation artifact + DB rows):
+      - `make confirm-fills FILLS_JSON=/path/to/fills.json`
+      - or `python3 scripts/confirmations_submit.py --fills-json /path/to/fills.json --ticket-id <ticket_id>`
   - Verification:
-    - A confirmation produces DB rows in `ledger_trades_fills` and writes artifacts under the ticket dir.
+    - Confirmation artifact exists under the ticket dir.
+    - DB rows exist under `ledger_trades_fills` for that `ticket_id`.
+    - Ticket renderer shows a “Confirmed fills” section when fills exist (or links to confirmation artifacts).
   - Artifacts:
-    - `/data/trading-ops/artifacts/tickets/<ticket_id>/confirmation.json`
-    - DB: `ledger_trades_fills` rows
+    - `/data/trading-ops/artifacts/tickets/<ticket_id>/confirmations/<confirmation_uuid>/confirmation.json`
+    - `/data/trading-ops/artifacts/tickets/<ticket_id>/confirmations/<confirmation_uuid>/confirmation.md`
+    - DB: `ledger_trades_fills` rows for `<ticket_id>`
   - Done when:
     - Fill capture is reproducible and auditable.
 
