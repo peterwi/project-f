@@ -1,107 +1,203 @@
-# Next Milestone Proposal (toward “daily automated trade instructions”)
+# M10 — Data Quality PASS + Real Alerts Delivery (Execution Checklist)
 
-Target end-state: a deterministic, daily, reproducible pipeline that produces a human-reviewable “daily ticket” with trade instructions and evidence, without bypassing gates.
+This milestone combines:
+- **M10.B — Data Quality PASS** (pipeline reliability)
+- **M10.C — Real secondary alert sink** (visibility + receipts)
 
-Below are three milestone options; pick one to execute next.
+Hard boundaries:
+- No trading is enabled by this milestone (NO-TRADE only).
+- Changes must be minimal and deterministic; failures must produce artifacts under `/data`.
 
----
-
-## Option A — M10 Hardening + Safety (recommended after data is stable)
-
-### Objective
-Reduce operational risk and make daily runs safer and more reproducible (secrets hygiene, backups/restore proof, permissions, and regression checks).
-
-### Checklist items (5–10)
-1) Confirm secrets are local-only (`open-ai.key`, `config/secrets.env`) and never logged.
-2) Add a “sanitized logging” rule for any new scripts that touch env vars.
-3) Prove Docker access is stable in the operator session (no sudo; no hidden blockers).
-4) Prove DB backup + restore procedure works (dry-run, non-destructive where possible).
-5) Add minimal smoke checks for the daily pipeline entrypoints (lint optional; runtime checks preferred).
-6) Add artifact retention/pruning guidance for `/data/trading-ops/artifacts/*` (avoid disk exhaustion).
-
-### Verification commands
-- `git status --porcelain=v1`
-- `docker ps`
-- `git check-ignore -v config/secrets.env open-ai.key || true`
-- `rg -n \"OPENAI_API_KEY|Authorization: Bearer\" -S . || true` (ensure no logs/scripts print secrets)
-- `ls -la /data/trading-ops/artifacts | head`
-- Backup/restore proof (use existing scripts if present):
-  - `ls -la scripts | rg -n \"backup|restore\"`
-  - `bash scripts/db_backup.sh --help || true`
-  - `bash scripts/db_restore.sh --help || true`
-
-### Artifacts
-- `/data/trading-ops/artifacts/<...>/backup_*.log` (or equivalent)
-- `docs/PM_LOG.md` entry with commands + outputs
-
-### Why it matters for “daily ticket”
-Daily automation without hardening tends to fail silently (permissions, disk, secrets leakage). This option makes “daily ticket” runs safe to schedule and debug.
+Pass definitions:
+- **M10.B PASS**
+  - `make run-0800` produces `DATA_QUALITY_PASS` and writes a PASS report under `/data/trading-ops/artifacts/reports/`
+  - AND `make run-1400` can run without refetch and does not fail the data-quality gate.
+- **M10.C PASS**
+  - A secondary sink is enabled with `ALERT_SECONDARY_DRYRUN=false`
+  - A delivery receipt is written under `/data/trading-ops/artifacts/alerts/<alert_id>/delivery.md` showing `SENT` (or deterministic `FAILED` with HTTP/status reason)
+  - Deliveries are recorded in Postgres (`alert_deliveries`).
 
 ---
 
-## Option B — M6.3 Data Quality PASS + stable EOD pipeline (recommended first)
+## M10.B — Data Quality PASS
 
-### Objective
-Make the daily EOD ingestion + data-quality gate consistently PASS so the “daily ticket” can be produced without frequent operator intervention.
+- [x] **M10.B.1 Identify the current failing rule(s)**
+  - Objective: Use the latest data-quality report artifact to pinpoint the exact failing rule(s) and inputs.
+  - Commands:
+    - `ls -1t /data/trading-ops/artifacts/reports/*data_quality* | head -n 5`
+    - `sed -n '1,220p' <latest_report>`
+    - If no report exists: `make run-0800` then re-check.
+  - Verification:
+    - A concrete rule name/error text and the relevant symbol/date context are identified.
+  - Artifacts:
+    - Existing report under `/data/trading-ops/artifacts/reports/`
+    - `docs/PM_LOG.md` entry recording the failing rule and report path.
+  - Done when:
+    - The failing rule(s) are identified and logged, with the report path.
 
-### Checklist items (5–10)
-1) Identify the first failing data-quality check(s) in the current daily path.
-2) Make EOD ingest deterministic (same inputs → same outputs) and idempotent.
-3) Ensure coverage: `adj_close` populated for 100% ingested rows (no nulls).
-4) Ensure universe fetch isn’t over-inclusive (enabled symbols only + explicit benchmarks).
-5) Ensure failures write actionable artifacts under `/data/.../artifacts/...` (not just console).
-6) Add a single “daily pipeline” smoke command that runs ingest + gate + report in dry-run/shadow mode.
+- [ ] **M10.B.2 Capture a fresh baseline run (0800)**
+  - Objective: Run the 08:00 pipeline and capture a reproducible baseline artifact set for debugging.
+  - Commands:
+    - `git status --porcelain=v1`
+    - `make run-0800`
+    - `ls -1t /data/trading-ops/artifacts/reports/*data_quality* | head -n 3`
+  - Verification:
+    - A new data-quality report is written under `/data/trading-ops/artifacts/reports/`.
+  - Artifacts:
+    - `/data/trading-ops/artifacts/reports/<new_report>`
+  - Done when:
+    - The newest report corresponds to this run and clearly shows PASS/FAIL with reasons.
 
-### Verification commands
-- `git status --porcelain=v1`
-- `python scripts/market_fetch_eod.py --max-rows 5`
-- `python scripts/data_quality_gate.py --help || true`
-- `python scripts/report_daily.py --help || true`
-- If Postgres is used:
-  - `docker compose -f docker/compose.yml --env-file config/secrets.env ps`
-  - `docker compose -f docker/compose.yml --env-file config/secrets.env exec -T postgres psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -tA -c \"select count(*) from market_prices_eod where adj_close is null;\"`
+- [ ] **M10.B.3 Fix universe/benchmark emptiness issues (if present)**
+  - Objective: Ensure universe is non-empty, enabled symbols are used, and benchmarks/index rows exist when required by gates.
+  - Commands:
+    - `python scripts/universe_validate.py`
+    - `python scripts/market_fetch_eod.py --max-rows 20`
+    - Re-run: `make run-0800`
+  - Verification:
+    - Universe validation passes and data-quality report no longer fails for “empty universe” / missing benchmark.
+  - Artifacts:
+    - Updated data-quality report(s) under `/data/trading-ops/artifacts/reports/`
+  - Done when:
+    - The report no longer cites universe/benchmark emptiness as a failure cause.
 
-### Artifacts
-- `/data/trading-ops/artifacts/<...>/data_quality_*.md` (or equivalent)
-- `/data/trading-ops/artifacts/<...>/daily_*.md` (daily ticket inputs)
-- `docs/PM_LOG.md` entry with run_id + verification outputs
+- [ ] **M10.B.4 Fix symbol mapping issues (stooq symbol suffix, etc.)**
+  - Objective: Ensure provider symbol mapping is correct so ingestion produces rows for expected symbols.
+  - Commands:
+    - `python scripts/market_fetch_eod.py --max-rows 50`
+    - Inspect the failing symbols from the report and verify mapping config/code.
+    - Re-run: `make run-0800`
+  - Verification:
+    - Previously missing symbols now ingest, and the report no longer fails on missing/mismatched symbol mapping.
+  - Artifacts:
+    - Updated report(s) under `/data/trading-ops/artifacts/reports/`
+  - Done when:
+    - The gate stops failing due to symbol mapping.
 
-### Why it matters for “daily ticket”
-If data-quality fails frequently, the daily ticket can’t be generated reliably. This option addresses the most common blocker for daily automation: “pipeline doesn’t reach the ticket step.”
+- [ ] **M10.B.5 Fix “as-of/freshness” day alignment (US T-1 expectation)**
+  - Objective: Ensure freshness logic aligns with US trading calendar for UK-morning runs (typically expects last US trading day).
+  - Commands:
+    - Inspect rule implementation and current “as-of” date logic.
+    - Re-run: `make run-0800`
+  - Verification:
+    - Data-quality report passes freshness checks on normal weekdays and handles holidays deterministically.
+  - Artifacts:
+    - Updated report(s) under `/data/trading-ops/artifacts/reports/`
+    - If behavior changes: update `docs/DATA_QUALITY_RULES.md`
+  - Done when:
+    - Freshness checks are consistently PASS given correct upstream data.
+
+- [ ] **M10.B.6 Fix duplicates/conflicting rows (if present)**
+  - Objective: Remove deterministic-gate failures caused by duplicate/conflicting rows per symbol/date/source.
+  - Commands:
+    - Use report evidence to identify the duplication source.
+    - Run reconciliation/selftest where applicable:
+      - `python scripts/reconcile_selftest.py`
+    - Re-run: `make run-0800`
+  - Verification:
+    - Data-quality report no longer fails due to duplicates/conflicts.
+  - Artifacts:
+    - Updated report(s) under `/data/trading-ops/artifacts/reports/`
+  - Done when:
+    - Duplicate/conflict related failures are eliminated.
+
+- [ ] **M10.B.7 Prove 14:00 run does not refetch and still passes**
+  - Objective: Ensure `make run-1400` works without refetch and does not fail data-quality.
+  - Commands:
+    - `make run-0800`
+    - `make run-1400`
+    - `ls -1t /data/trading-ops/artifacts/reports/*data_quality* | head -n 6`
+  - Verification:
+    - Both runs complete and the newest data-quality reports indicate PASS.
+  - Artifacts:
+    - PASS report(s) under `/data/trading-ops/artifacts/reports/`
+  - Done when:
+    - **M10.B PASS** definition is satisfied.
 
 ---
 
-## Option C — M8.4 Real secondary alert sink (Slack/ntfy/email)
+## M10.C — Real secondary alert sink (enable delivery; file-only remains primary)
 
-### Objective
-Ensure operational failures are visible quickly by delivering alerts to a real channel (while keeping dry-run defaults and respecting “no live trading” constraints).
+- [ ] **M10.C.1 Inventory current alert pipeline + DB table**
+  - Objective: Confirm existing alert scripts, delivery artifacts, and Postgres table `alert_deliveries` are present and reachable.
+  - Commands:
+    - `ls -la scripts | rg -n \"alert_(emit|deliver)\"`
+    - `docker compose -f docker/compose.yml --env-file config/secrets.env exec -T postgres psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -v ON_ERROR_STOP=1 -c \"\\d alert_deliveries\"`
+  - Verification:
+    - Table exists and alert scripts are present.
+  - Artifacts:
+    - `docs/PM_LOG.md` entry capturing the table existence check.
+  - Done when:
+    - Alert scripts and DB table are confirmed.
 
-### Checklist items (5–10)
-1) Decide the sink (ntfy preferred for simplicity; Slack/email optional).
-2) Implement a dry-run mode that writes delivery artifacts but does not send.
-3) Implement a send mode gated behind explicit operator confirmation.
-4) Add retry/backoff + failure artifact capture.
-5) Ensure secrets for alert delivery are stored locally-only and never logged.
+- [ ] **M10.C.2 Add docs/ALERTS.md and configuration keys**
+  - Objective: Document configuration for secondary sink delivery (default to NTFY) with explicit dry-run controls.
+  - Commands:
+    - Edit docs and add a one-command smoke test section.
+  - Verification:
+    - Docs clearly state required env vars and safety defaults.
+  - Artifacts:
+    - `docs/ALERTS.md`
+  - Done when:
+    - Docs exist and include a one-command smoke test.
 
-### Verification commands
-- `git status --porcelain=v1`
-- `python scripts/alert_emit.py --help || true`
-- `python scripts/alert_deliver.py --help || true`
-- Dry-run delivery:
-  - `python scripts/alert_emit.py ...`
-  - `python scripts/alert_deliver.py ... --dryrun`
-- Verify artifacts:
-  - `ls -la /data/trading-ops/artifacts/alerts | tail`
+- [ ] **M10.C.3 Implement NTFY secondary sink delivery (real HTTPS)**
+  - Objective: Add an NTFY sender to `scripts/alert_deliver.py` controlled by env vars and `ALERT_SECONDARY_DRYRUN`.
+  - Commands:
+    - Update code to POST to `ALERT_NTFY_URL` with sanitized content.
+  - Verification:
+    - Delivery attempt produces deterministic receipts (`SENT` or `FAILED` with HTTP/status reason).
+  - Artifacts:
+    - `/data/trading-ops/artifacts/alerts/<alert_id>/delivery.json`
+    - `/data/trading-ops/artifacts/alerts/<alert_id>/delivery.md`
+  - Done when:
+    - Receipts include timestamp, sink, HTTP status, and response summary (no secrets).
 
-### Artifacts
-- `/data/trading-ops/artifacts/alerts/<alert_id>/delivery.md`
-- `/data/trading-ops/artifacts/alerts/<alert_id>/delivery.json`
-- `docs/PM_LOG.md` entry with verification outputs
+- [ ] **M10.C.4 Persist delivery receipts to Postgres**
+  - Objective: Ensure `alert_deliveries` records are written for secondary sink attempts.
+  - Commands:
+    - Run a delivery and query:
+      - `docker compose -f docker/compose.yml --env-file config/secrets.env exec -T postgres psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -tA -c \"select sink, dryrun, status, coalesce(error_text,'') from alert_deliveries order by created_at desc limit 5;\"`
+  - Verification:
+    - A row exists for the most recent delivery attempt with correct `sink`, `dryrun`, and `status`.
+  - Artifacts:
+    - DB rows + delivery receipts under `/data/.../alerts/...`
+  - Done when:
+    - DB rows reflect delivery attempts deterministically.
 
-### Why it matters for “daily ticket”
-Daily automation without alerting can fail unnoticed. This option improves operator awareness but does not, by itself, make the pipeline reach “daily ticket.”
+- [ ] **M10.C.5 Add “secondary delivery smoke test” (no trading)**
+  - Objective: Provide a safe one-command test that emits a synthetic alert and delivers it.
+  - Commands:
+    - Document and run a test command that:
+      - emits an alert (synthetic)
+      - delivers with `ALERT_SECONDARY_DRYRUN=false`
+  - Verification:
+    - Receipt shows `SENT` or deterministic `FAILED` with reason, and DB row exists.
+  - Artifacts:
+    - `/data/trading-ops/artifacts/alerts/<alert_id>/delivery.md`
+  - Done when:
+    - Smoke test is repeatable and produces receipts + DB row.
 
----
+- [ ] **M10.C.6 Ensure file-only remains primary sink**
+  - Objective: Keep existing file-only receipts as the primary mechanism; secondary sink is additive.
+  - Commands:
+    - Confirm primary artifacts still written even if secondary fails.
+  - Verification:
+    - Local artifact generation does not depend on secondary sink success.
+  - Artifacts:
+    - `/data/trading-ops/artifacts/alerts/<alert_id>/delivery.md`
+  - Done when:
+    - Primary artifacts always exist; secondary is best-effort.
 
-## Recommendation
-Pick **Option B first** (stabilize EOD + data-quality PASS). Then do **Option A** (hardening) before putting anything on a schedule. Option C is valuable but best after the core daily run is stable.
+- [ ] **M10.C.7 End-to-end proof**
+  - Objective: Prove **M10.C PASS** definition with one real delivery attempt.
+  - Commands:
+    - Run smoke test and verify:
+      - receipts exist
+      - Postgres rows exist
+  - Verification:
+    - **M10.C PASS** definition is satisfied.
+  - Artifacts:
+    - Delivery receipts + DB rows + `docs/PM_LOG.md` evidence.
+  - Done when:
+    - **M10.C PASS** definition is satisfied.
