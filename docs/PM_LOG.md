@@ -691,3 +691,8 @@ This file is append-only. Each agent message appends a new entry so the project 
   - `make migrate` (applied `0004_alerts.sql` + `0005_alert_deliveries.sql`)
   - `psql ... -c "\\d alert_deliveries"` (table present)
 - Result: PASS
+
+## 2026-01-02T22:11:32Z
+
+- Note: /data remounted onto /dev/sdc1 (XFS); ownership policy updated (artifacts/data/backups peter:docker g+rwX; postgres-data 70:70 chmod 700); Docker restarted and is healthy.
+- Decision: Alerting deferred (nice-to-have). Focus shifted to M11 (trade ticket workflow).
