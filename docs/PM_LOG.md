@@ -145,3 +145,31 @@ This file is append-only. Each agent message appends a new entry so the project 
   - Execute `M4.1` (create `config/qlib_shadow/workflow_us_lightgbm_alpha158_shadow.yaml`)
 - Blockers:
   - Docker socket access still requires escalated execution for this agent session.
+
+## 2026-01-02T14:29:10Z
+
+- Milestone / checklist: completed `M4.1`–`M4.4` (baseline qrun + signals export + summary); next is `M5.1`
+- What changed:
+  - Updated: `config/qlib_shadow/workflow_us_lightgbm_alpha158_shadow.yaml` (US dataset config; fixed end_time to avoid backtest calendar OOB)
+  - Created: `scripts/qlib_export_signals.py` (exports ranked signals from `mlruns/.../artifacts/pred.pkl`)
+  - Created: `docker/qlib-runner/constraints.txt` and updated `docker/qlib-runner/Dockerfile` (pinned `mlflow<3` for Qlib compatibility)
+  - Updated: `docs/CHECKLIST.md` (marked `M4.1`–`M4.4` as DONE)
+  - Updated: `docs/PM_STATE.md` (set `LAST_RUN_ID=20260102-141853Z-git07e5377`, advanced to `M5.1`)
+  - Wrote runtime artifacts under `/data`:
+    - `/data/artifacts/trading-ops/qlib-shadow/20260102-141853Z-git07e5377/` (workflow snapshot, logs, mlruns, signals export)
+    - `/data/artifacts/trading-ops/qlib-shadow/20260102-141853Z-git07e5377/backtest_summary.md`
+- Commands executed (high level):
+  - `qrun` baseline (initially failed due to MLflow version + end_time; fixed and re-ran successfully)
+  - Signals export: `python /repo/scripts/qlib_export_signals.py --mlruns ... --out ...`
+  - Dataset/calendar validation: `/data/qlib/qlib_data/us_data_1d/calendars/day.txt` tail check
+- Verification outputs (summary):
+  - Successful golden run folder exists: `/data/artifacts/trading-ops/qlib-shadow/20260102-141853Z-git07e5377/`
+  - `stdout.log` contains Qlib analysis output; `mlruns/` is non-empty
+  - Exported signals: `signals_ranked.parquet` exists (rows=`103`, asof_date=`2020-11-09`)
+  - `backtest_summary.md` exists and references paths + key metrics
+- Result: PASS
+  - Why: baseline dockerized Qlib workflow now runs end-to-end in shadow mode with persistent artifacts and portable signals export.
+- Next action:
+  - Execute `M5.1`
+- Blockers:
+  - Docker socket access still requires escalated execution for this agent session.

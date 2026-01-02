@@ -155,7 +155,7 @@ Non-negotiables (must remain true always):
 
 ## M4 — Qlib baseline `qrun` (LightGBM YAML, run, produce artifacts on /data)
 
-- [ ] **M4.1 Create shadow-mode workflow YAML for US dataset**
+- [x] **M4.1 Create shadow-mode workflow YAML for US dataset**
   - Objective: Create a baseline workflow config derived from Qlib’s LightGBM Alpha158 example, adapted to the downloaded US dataset.
   - Commands:
     - `test -f config/qlib_shadow/workflow_us_lightgbm_alpha158_shadow.yaml`
@@ -166,29 +166,27 @@ Non-negotiables (must remain true always):
   - Artifacts:
     - `config/qlib_shadow/workflow_us_lightgbm_alpha158_shadow.yaml`
 
-- [ ] **M4.2 Run a “golden” `qrun` in container and persist artifacts under `/data/.../qlib-shadow/<run_id>/`**
+- [x] **M4.2 Run a “golden” `qrun` in container and persist artifacts under `/data/.../qlib-shadow/<run_id>/`**
   - Objective: Produce a successful baseline backtest + recorder outputs in shadow mode.
   - Commands:
-    - `bash -lc 'run_id="$(date -u +%Y%m%d-%H%M%SZ)-git$(git rev-parse --short HEAD)"; echo "$run_id"'`
-    - `docker compose -f docker/compose.yml run --rm qlib-runner bash -lc "set -euo pipefail; run_id=$run_id; out=/data/artifacts/trading-ops/qlib-shadow/$run_id; mkdir -p $out; cp /repo/config/qlib_shadow/workflow_us_lightgbm_alpha158_shadow.yaml $out/workflow.yaml; qrun /repo/config/qlib_shadow/workflow_us_lightgbm_alpha158_shadow.yaml --experiment_name $run_id --uri_folder $out/mlruns >$out/stdout.log 2>$out/stderr.log"`
-    - `ls -la /data/artifacts/trading-ops/qlib-shadow/$run_id | head -n 50`
+    - `bash -lc 'set -euo pipefail; run_id="$(date -u +%Y%m%d-%H%M%SZ)-git$(git rev-parse --short HEAD)"; out="/data/artifacts/trading-ops/qlib-shadow/${run_id}"; docker compose -f docker/compose.yml --env-file config/secrets.env run --rm qlib-runner bash -lc "set -euo pipefail; mkdir -p \"${out}\"; cp /repo/config/qlib_shadow/workflow_us_lightgbm_alpha158_shadow.yaml \"${out}/workflow.yaml\"; cd /work; qrun /repo/config/qlib_shadow/workflow_us_lightgbm_alpha158_shadow.yaml --experiment_name \"${run_id}\" --uri_folder \"${out}/mlruns\" >\"${out}/stdout.log\" 2>\"${out}/stderr.log\""; echo \"run_id=${run_id}\"; ls -la \"${out}\" | head -n 50'`
   - Verification:
     - `stdout.log` exists and includes Qlib analysis output.
     - `mlruns/` exists under the run folder and is non-empty.
   - Artifacts:
     - `/data/artifacts/trading-ops/qlib-shadow/<run_id>/...`
 
-- [ ] **M4.3 Export ranked signals from Qlib recorder artifacts**
+- [x] **M4.3 Export ranked signals from Qlib recorder artifacts**
   - Objective: Extract model outputs into a portable ranked signals file (shadow artifact only).
   - Commands:
     - `test -f scripts/qlib_export_signals.py`
-    - `docker compose -f docker/compose.yml run --rm qlib-runner python /repo/scripts/qlib_export_signals.py --mlruns /data/artifacts/trading-ops/qlib-shadow/<run_id>/mlruns --out /data/artifacts/trading-ops/qlib-shadow/<run_id>/signals_ranked.parquet`
+    - `docker compose -f docker/compose.yml --env-file config/secrets.env run --rm qlib-runner python /repo/scripts/qlib_export_signals.py --mlruns /data/artifacts/trading-ops/qlib-shadow/<run_id>/mlruns --out /data/artifacts/trading-ops/qlib-shadow/<run_id>/signals_ranked.parquet`
   - Verification:
     - `signals_ranked.parquet` (or `.csv`) exists under the run folder and is non-empty.
   - Artifacts:
     - `/data/artifacts/trading-ops/qlib-shadow/<run_id>/signals_ranked.parquet`
 
-- [ ] **M4.4 Write minimal backtest summary markdown**
+- [x] **M4.4 Write minimal backtest summary markdown**
   - Objective: Produce a human-readable summary with key metrics and artifact locations.
   - Commands:
     - `test -f /data/artifacts/trading-ops/qlib-shadow/<run_id>/backtest_summary.md`
