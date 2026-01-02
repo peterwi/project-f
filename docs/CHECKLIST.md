@@ -380,7 +380,7 @@ Non-negotiables (must remain true always):
     - `docs/RD_AGENT_POLICY.md`
     - `docs/RD_AGENT_RUNBOOK.md`
 
-- [ ] **M9.2 Run RD-Agent in dry-run repo audit mode (no changes applied)**
+- [x] **M9.2 Run RD-Agent in dry-run repo audit mode (no changes applied)**
   - Objective: Prove RD-Agent can analyze and propose without modifying repo state.
   - Commands:
     - Install RD-Agent into a dedicated `/data` venv:
@@ -400,9 +400,6 @@ Non-negotiables (must remain true always):
   - Artifacts:
     - `/data/trading-ops/artifacts/rd-agent/<run_id>/outputs.md`
     - `/data/trading-ops/artifacts/rd-agent/<run_id>/patch.diff` (optional)
-  - Blocker:
-    - RD-Agent installed, but the OpenAI key in `./open-ai.key` currently fails with quota errors; replace/refresh key and rerun.
-
 - [ ] **M9.3 Allow RD-Agent to propose one patch and validate via checklist**
   - Objective: Run the full workflow: proposal → human review → apply → verify → log.
   - Commands:

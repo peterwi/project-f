@@ -566,3 +566,22 @@ This file is append-only. Each agent message appends a new entry so the project 
   - `source /data/trading-ops/venvs/rdagent/bin/activate && rdagent collect_info > .../collect_info.txt 2>&1`
 - Result: PASS (evidence captured)
   - Why: Confirms RD-Agent is installed and runnable without modifying the repo.
+
+## 2026-01-02T20:44:14Z
+
+- Milestone / checklist: completed `M9.2` (RD-Agent dry-run repo audit); next is `M9.3`
+- What changed:
+  - Retested OpenAI API access using `./open-ai.key` (`/v1/models` returned HTTP=200).
+  - Ran RD-Agent in an isolated copy (`git worktree`, detached HEAD) and wrote audit artifacts under:
+    - `/data/trading-ops/artifacts/rd-agent/20260102-203514Z-rd-audit-git4bd228a/`
+- Artifacts:
+  - `/data/trading-ops/artifacts/rd-agent/20260102-203514Z-rd-audit-git4bd228a/prompt.md`
+  - `/data/trading-ops/artifacts/rd-agent/20260102-203514Z-rd-audit-git4bd228a/outputs.md`
+  - `/data/trading-ops/artifacts/rd-agent/20260102-203514Z-rd-audit-git4bd228a/run.log`
+  - `/data/trading-ops/artifacts/rd-agent/20260102-203514Z-rd-audit-git4bd228a/help.txt`
+  - `/data/trading-ops/artifacts/rd-agent/20260102-203514Z-rd-audit-git4bd228a/git_status_main_before.txt`
+  - `/data/trading-ops/artifacts/rd-agent/20260102-203514Z-rd-audit-git4bd228a/git_status_main_after.txt`
+  - `/data/trading-ops/artifacts/rd-agent/20260102-203514Z-rd-audit-git4bd228a/git_status_worktree_before.txt`
+  - `/data/trading-ops/artifacts/rd-agent/20260102-203514Z-rd-audit-git4bd228a/git_status_worktree_after.txt`
+- Result: PASS
+  - Why: `outputs.md` exists; both main repo and worktree `git status --porcelain=v1` were clean before/after; no secrets were logged.
