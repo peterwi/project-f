@@ -100,8 +100,10 @@ To ensure stable diffs and stable ticket rendering, intentions must be emitted i
   - `units = floor(abs(notional_value_base) / reference_price)`
 - If `units == 0` after rounding, the trade must be omitted.
 
+For BUY intents, the system may emit a GBP-notional-only intent (units omitted/null) when the broker supports “amount buys”. This keeps the ticket GBP-sized and deterministic for small accounts.
+
 ### Minimum trade size filter
-Skip any trade with `abs(notional_value_base) < MIN_NOTIONAL_BASE`.
+Skip any trade with `abs(notional_value_base) < MIN_NOTIONAL_BASE`. For small portfolios, implementations may deterministically scale this minimum down using a configured percentage of portfolio value (while remaining fully deterministic).
 
 ## Failure / Block Reasons (Contract)
 

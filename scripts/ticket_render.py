@@ -118,6 +118,7 @@ class RunInputs:
     run_summary_md: Path
     no_trade_json: Path | None
     trades_proposed_json: Path | None
+    trades_intended_json: Path | None
 
 
 def _load_run_inputs(run_id: str) -> RunInputs:
@@ -128,12 +129,14 @@ def _load_run_inputs(run_id: str) -> RunInputs:
 
     no_trade_json = run_dir / "no_trade.json"
     trades_proposed_json = run_dir / "trades_proposed.json"
+    trades_intended_json = run_dir / "trades_intended.json"
     return RunInputs(
         run_id=run_id,
         run_dir=run_dir,
         run_summary_md=run_summary_md,
         no_trade_json=(no_trade_json if no_trade_json.exists() else None),
         trades_proposed_json=(trades_proposed_json if trades_proposed_json.exists() else None),
+        trades_intended_json=(trades_intended_json if trades_intended_json.exists() else None),
     )
 
 
@@ -253,6 +256,7 @@ def _parse_run_summary_steps(path: Path) -> dict[str, str]:
 def _render_ticket_md(payload: dict) -> str:
     reasons_json = json.dumps(payload.get("blocking_reasons", []), indent=2)
     gate_statuses_json = json.dumps(payload.get("gate_statuses", {}), indent=2)
+    intended_trades = payload.get("intended_trades") or []
 
     lines: list[str] = []
     lines.append("# Trade Ticket")
@@ -289,6 +293,39 @@ def _render_ticket_md(payload: dict) -> str:
         lines.append(f"- {k}: `{v}`")
     lines.append("")
 
+    if intended_trades:
+        lines.append("## Intended trades (draft)")
+        lines.append("")
+        lines.append("These are deterministic intended trades sized from the current ledger/snapshot and target weights.")
+        lines.append("Do not execute unless DECISION=TRADE and reconciliation is passing.")
+        lines.append("")
+        lines.append("Execution rules:")
+        lines.append("- Skip a line if the instrument is not findable as a stock on the broker (CFD-only / not supported).")
+        lines.append("- Record any skipped line and reason in the confirmations flow.")
+        lines.append("")
+        for t in intended_trades:
+            side = str(t.get("side", "")).upper()
+            sym = str(t.get("internal_symbol", ""))
+            units = t.get("units", None)
+            notional = t.get("notional_value_base", None)
+            ref_px = t.get("reference_price", None)
+            slippage = t.get("max_slippage_bps", None)
+            units_s = (f"{units:g}" if isinstance(units, (int, float)) else str(units)) if units is not None else "N/A"
+            notional_s = (f"{float(notional):.2f}" if isinstance(notional, (int, float)) else str(notional)) if notional is not None else ""
+            ref_s = (f"{float(ref_px):.4f}" if isinstance(ref_px, (int, float)) else str(ref_px)) if ref_px is not None else ""
+            slip_s = (str(slippage) if slippage is not None else "")
+            parts = [side, sym]
+            if units_s and units_s != "N/A":
+                parts.append(f"units={units_s}")
+            if notional_s:
+                parts.append(f"~{payload.get('base_currency','GBP')}{notional_s}")
+            if ref_s:
+                parts.append(f"ref={ref_s}")
+            if slip_s:
+                parts.append(f"slip={slip_s}bps")
+            lines.append(f"- {' '.join(parts)}")
+        lines.append("")
+
     if payload["decision_type"] == "NO_TRADE":
         lines.append("## NO-TRADE (blocked)")
         lines.append("")
@@ -300,10 +337,11 @@ def _render_ticket_md(payload: dict) -> str:
         lines.append("")
         return "\n".join(lines)
 
-    lines.append("## TRADE (not implemented in v1)")
+    lines.append("## TRADE")
     lines.append("")
-    lines.append("This system does not yet support deterministic intended trade rendering.")
-    lines.append("")
+    if not intended_trades:
+        lines.append("No intended trades found for this run.")
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -347,7 +385,21 @@ def main() -> int:
         trades_proposed = _read_json(inputs.trades_proposed_json)
         trades_proposed_asof = str(trades_proposed.get("asof_date", "") or "")
 
-    asof_date = run_meta.get("asof_date") or no_trade_asof or trades_proposed_asof
+    trades_intended_asof: str = ""
+    intended_trades: list[dict] = []
+    base_currency = "GBP"
+    if inputs.trades_intended_json:
+        trades_intended = _read_json(inputs.trades_intended_json)
+        trades_intended_asof = str(trades_intended.get("asof_date_used", "") or "")
+        base_currency = str(trades_intended.get("base_currency", "") or base_currency)
+        intended_trades = list(trades_intended.get("intended_trades", []) or [])
+        gate_statuses["trade_builder"] = {
+            "trade_builder_ok": bool((trades_intended.get("result") or {}).get("trade_builder_ok", False)),
+            "reason": str((trades_intended.get("result") or {}).get("reason", "")),
+            "intended_count": len(intended_trades),
+        }
+
+    asof_date = run_meta.get("asof_date") or no_trade_asof or trades_intended_asof or trades_proposed_asof
 
     ticket_dir = TICKETS_DIR / ticket_id
     ticket_dir.mkdir(parents=True, exist_ok=True)
@@ -365,12 +417,14 @@ def main() -> int:
         "ticket_id": ticket_id,
         "run_id": run_id,
         "asof_date": asof_date,
+        "base_currency": base_currency,
         "created_utc": created_utc,
         "decision_type": decision_type,
         "execution_window_uk": execution_window_uk,
         "universe": universe,
         "gate_statuses": gate_statuses,
         "blocking_reasons": blocking_reasons,
+        "intended_trades": intended_trades,
         "git_commit": run_meta.get("git_commit", ""),
         "config_hash": run_meta.get("config_hash", ""),
         "artifact_paths": artifact_paths,
@@ -378,6 +432,7 @@ def main() -> int:
             "run_summary_md": str(inputs.run_summary_md),
             "no_trade_json": (str(inputs.no_trade_json) if inputs.no_trade_json else ""),
             "trades_proposed_json": (str(inputs.trades_proposed_json) if inputs.trades_proposed_json else ""),
+            "trades_intended_json": (str(inputs.trades_intended_json) if inputs.trades_intended_json else ""),
         },
         "outputs": outputs,
     }

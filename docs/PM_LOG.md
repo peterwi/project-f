@@ -744,3 +744,19 @@ This file is append-only. Each agent message appends a new entry so the project 
 - Result: PASS (trade-builder ran deterministically; decision remained `NO_TRADE` due to missing reconciliation + no rebalancing at current account size)
 - Next action:
   - Start `M11.3.a` (render TRADE lines from intended trades when decision_type becomes TRADE).
+
+## 2026-01-02T22:51:58Z
+
+- Milestone: `M11.3` ticket rendering
+- Item: `M11.3.a` render intended trades into ticket
+- What changed:
+  - Updated `scripts/ticket_render.py` to render intended BUY/SELL lines from `trades_intended.json` and include explicit skip rules.
+  - Updated `scripts/trade_builder.py` to support GBP-notional BUY intents (units may be null) and scale min-notional for small accounts deterministically.
+- Verification run:
+  - `DRYRUN_TRADES=true make run-1400`
+  - Run: `/data/trading-ops/artifacts/runs/c2ceb408-bf24-4579-ba99-c87d9f779907/run_summary.md`
+  - Intended trades: `/data/trading-ops/artifacts/runs/c2ceb408-bf24-4579-ba99-c87d9f779907/trades_intended.json`
+  - Ticket: `/data/trading-ops/artifacts/tickets/810d0aa8-1d18-5680-839d-13933a8604d1/ticket.md`
+- Result: PASS (ticket renders draft intended trades; DECISION remains `NO_TRADE` until reconciliation passes)
+- Next action:
+  - Start `M11.4.a` (confirmation payload → `ledger_trades_fills`).

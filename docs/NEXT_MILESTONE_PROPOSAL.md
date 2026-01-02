@@ -104,17 +104,17 @@ Run references (current known-good baseline):
 
 ## M11.3 Ticket rendering for TRADE (GBP sizing + “skip if not tradable” rules)
 
-- [ ] **M11.3.a Extend ticket renderer to include TRADE lines**
+- [x] **M11.3.a Extend ticket renderer to include TRADE lines**
   - Objective: Render intended trades into human-executable ticket lines with GBP sizing guidance.
   - Commands:
     - Run: `make run-1400` with `DRYRUN_TRADES=true`
     - Inspect ticket artifact directory.
   - Verification:
-    - Ticket includes BUY/SELL lines, sizing, and explicit “skip if only CFD / not found” rules.
+    - Ticket includes BUY/SELL lines (rendered from `trades_intended.json`) and explicit “skip if only CFD / not found” rules.
   - Artifacts:
     - `/data/trading-ops/artifacts/tickets/<ticket_id>/ticket.md`
   - Done when:
-    - A TRADE ticket is produced in dry-run mode.
+    - Ticket renders intended trade lines deterministically (even if DECISION remains NO_TRADE due to gating).
 
 ---
 

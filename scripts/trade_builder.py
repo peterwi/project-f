@@ -21,6 +21,7 @@ DEFAULT_BASE_CURRENCY = "GBP"
 DEFAULT_ORDER_TYPE = "MKT"
 DEFAULT_MAX_SLIPPAGE_BPS = 50
 DEFAULT_MIN_NOTIONAL_BASE = 25.0
+DEFAULT_MIN_NOTIONAL_PCT = 0.01
 
 
 def _read_env_file(path: Path) -> dict[str, str]:
@@ -146,7 +147,8 @@ def build_trades_for_run(*, run_id: str, asof_date: str, policy: dict) -> TradeB
 
     dryrun_trades = os.environ.get("DRYRUN_TRADES", "").strip().lower() in ("1", "true", "t", "yes")
     base_currency = DEFAULT_BASE_CURRENCY
-    min_notional = float(policy.get("trade_builder", {}).get("min_notional_base", DEFAULT_MIN_NOTIONAL_BASE))
+    min_notional_abs = float(policy.get("trade_builder", {}).get("min_notional_base", DEFAULT_MIN_NOTIONAL_BASE))
+    min_notional_pct = float(policy.get("trade_builder", {}).get("min_notional_pct", DEFAULT_MIN_NOTIONAL_PCT))
     max_slippage_bps = int(policy.get("trade_builder", {}).get("max_slippage_bps", DEFAULT_MAX_SLIPPAGE_BPS))
     order_type = str(policy.get("trade_builder", {}).get("order_type", DEFAULT_ORDER_TYPE))
 
@@ -156,7 +158,7 @@ def build_trades_for_run(*, run_id: str, asof_date: str, policy: dict) -> TradeB
         "asof_date_used": asof_date,
         "base_currency": base_currency,
         "policy": {
-            "min_notional_base": min_notional,
+            "min_notional_base": min_notional_abs,
             "default_order_type": order_type,
             "default_max_slippage_bps": max_slippage_bps,
         },
@@ -172,7 +174,12 @@ def build_trades_for_run(*, run_id: str, asof_date: str, policy: dict) -> TradeB
     }
 
     out_path = run_dir / "trades_intended.json"
-    detail: dict = {"dryrun_trades": dryrun_trades, "min_notional_base": min_notional, "max_slippage_bps": max_slippage_bps}
+    detail: dict = {
+        "dryrun_trades": dryrun_trades,
+        "min_notional_base_abs": min_notional_abs,
+        "min_notional_pct": min_notional_pct,
+        "max_slippage_bps": max_slippage_bps,
+    }
 
     if not dryrun_trades:
         result["result"] = {"trade_builder_ok": False, "reason": "DRYRUN_TRADES_DISABLED"}
@@ -285,6 +292,12 @@ def build_trades_for_run(*, run_id: str, asof_date: str, policy: dict) -> TradeB
         portfolio_value += units * px
     detail["portfolio_value_base"] = portfolio_value
 
+    effective_min_notional = min_notional_abs
+    if portfolio_value > 0 and min_notional_pct > 0:
+        effective_min_notional = min(min_notional_abs, float(portfolio_value) * float(min_notional_pct))
+    detail["effective_min_notional_base"] = effective_min_notional
+    result["policy"]["min_notional_base"] = effective_min_notional
+
     current_values: dict[str, float] = {}
     for sym in price_syms:
         units = positions.get(sym, 0.0)
@@ -312,7 +325,7 @@ def build_trades_for_run(*, run_id: str, asof_date: str, policy: dict) -> TradeB
             sellable_units = int(math.floor(max(0.0, cur_units)))
             units = min(sellable_units, _floor_units(abs(delta), px))
             notional = float(units) * px
-            if units > 0 and notional >= min_notional:
+            if units > 0 and notional >= effective_min_notional:
                 sells.append(TradeIntent(sym, "SELL", units, notional, px))
                 cash_after_sells += notional
 
@@ -325,28 +338,28 @@ def build_trades_for_run(*, run_id: str, asof_date: str, policy: dict) -> TradeB
         if delta > 0:
             notional_wanted = min(delta, cash_available)
             units = _floor_units(notional_wanted, px)
-            notional = float(units) * px
-            if units > 0 and notional >= min_notional:
+            notional = (float(units) * px) if units > 0 else float(max(0.0, notional_wanted))
+            if notional >= effective_min_notional:
                 buys.append(TradeIntent(sym, "BUY", units, notional, px))
                 cash_available -= notional
 
     intents = sorted(sells, key=lambda t: t.internal_symbol) + sorted(buys, key=lambda t: t.internal_symbol)
     intended_trades: list[dict] = []
     for i, t in enumerate(intents, start=1):
-        intended_trades.append(
-            {
-                "sequence": i,
-                "internal_symbol": t.internal_symbol,
-                "side": t.side,
-                "units": t.units,
-                "notional_value_base": round(t.notional_value_base, 8),
-                "order_type": order_type,
-                "limit_price": None,
-                "reference_price": round(t.reference_price, 8),
-                "max_slippage_bps": max_slippage_bps,
-                "rationale": "Deterministic rebalance vs target weights.",
-            }
-        )
+        row: dict = {
+            "sequence": i,
+            "internal_symbol": t.internal_symbol,
+            "side": t.side,
+            "notional_value_base": round(t.notional_value_base, 8),
+            "order_type": order_type,
+            "limit_price": None,
+            "reference_price": round(t.reference_price, 8),
+            "max_slippage_bps": max_slippage_bps,
+            "rationale": "Deterministic rebalance vs target weights.",
+        }
+        if t.units > 0:
+            row["units"] = t.units
+        intended_trades.append(row)
 
     result["intended_trades"] = intended_trades
     result["result"] = {"trade_builder_ok": True, "reason": ("OK" if intended_trades else "NO_REBALANCE")}
@@ -357,9 +370,10 @@ def build_trades_for_run(*, run_id: str, asof_date: str, policy: dict) -> TradeB
         sym = row["internal_symbol"].replace("'", "''")
         side = row["side"]
         seq = int(row["sequence"])
-        units = int(row["units"])
+        units = int(row["units"]) if ("units" in row and row["units"] is not None) else None
         notional = float(row["notional_value_base"])
         ref_px = float(row["reference_price"])
+        units_sql = "null" if units is None else str(units)
         _psql_exec(
             f"""
             insert into ledger_trades_intended(
@@ -369,7 +383,7 @@ def build_trades_for_run(*, run_id: str, asof_date: str, policy: dict) -> TradeB
             )
             values (
               '{run_id}', {seq}, '{sym}', '{side}',
-              {notional}, {units},
+              {notional}, {units_sql},
               '{order_type}', null, {ref_px}, {max_slippage_bps}
             )
             on conflict (run_id, sequence) do update set
