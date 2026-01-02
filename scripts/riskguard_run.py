@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -104,6 +105,14 @@ def _policy_hash() -> str:
 
 def _artifacts_root(env: dict[str, str]) -> Path:
     return Path(env.get("ARTIFACTS_DIR", "/data/trading-ops/artifacts")).resolve()
+
+
+def _bool_env(name: str, default: bool = False) -> bool:
+    v = os.environ.get(name, "").strip().lower()
+    if not v:
+        return default
+    return v in ("1", "true", "t", "yes", "y", "on")
+
 
 def _emit_alert_blocked(*, run_id: str, asof: str, reasons: list[dict], risk_checks: list[tuple[str, bool, dict]], run_dir: Path, no_trade_path: Path, proposed_path: Path) -> None:
     details = {
@@ -255,17 +264,6 @@ def main() -> int:
     if not ledger_ok:
         reasons.append({"code": "LEDGER_EMPTY", "detail": "Ledger has no starting cash movements or fills; cannot size trades safely."})
 
-    # v1 safety: we do not yet compute a real intended trade list (deltas + sizing).
-    # Until implemented, riskguard must never approve a TRADE decision.
-    trade_builder_ok = False
-    risk_checks.append(("trade_builder", trade_builder_ok, {"status": "not_implemented"}))
-    reasons.append(
-        {
-            "code": "TRADE_BUILDER_NOT_IMPLEMENTED",
-            "detail": "Riskguard currently produces target weights only; intended trades + sizing are not implemented yet.",
-        }
-    )
-
     max_positions = int(policy.get("portfolio", {}).get("max_positions", 15))
     max_w = float(policy.get("portfolio", {}).get("max_position_weight", 0.075))
     cash_buffer = float(policy.get("portfolio", {}).get("min_cash_buffer", 0.03))
@@ -292,6 +290,22 @@ def main() -> int:
         for s in top:
             targets.append({"symbol": s["symbol"], "target_weight": per})
 
+    if asof:
+        _psql_exec(f"delete from portfolio_targets where run_id = '{run_id}';")
+        for t in targets:
+            sym = str(t["symbol"]).replace("'", "''")
+            w = float(t["target_weight"])
+            _psql_exec(
+                f"""
+                insert into portfolio_targets(run_id, asof_date, internal_symbol, target_weight, base_currency)
+                values ('{run_id}', '{asof}', '{sym}', {w}, 'GBP')
+                on conflict (run_id, internal_symbol) do update set
+                  asof_date = excluded.asof_date,
+                  target_weight = excluded.target_weight,
+                  base_currency = excluded.base_currency;
+                """
+            )
+
     proposed = {
         "run_id": run_id,
         "asof_date": asof or None,
@@ -306,6 +320,45 @@ def main() -> int:
 
     proposed_path = run_dir / "trades_proposed.json"
     proposed_path.write_text(json.dumps(proposed, indent=2, sort_keys=True), encoding="utf-8")
+
+    dryrun_trades = _bool_env("DRYRUN_TRADES", False)
+    intended_count = 0
+    trade_builder_ok = False
+    tb_detail: dict = {"dryrun_trades": dryrun_trades}
+    if not dryrun_trades:
+        tb_detail["status"] = "disabled"
+        reasons.append(
+            {
+                "code": "DRYRUN_TRADES_DISABLED",
+                "detail": "Trade-builder is disabled by default. Set DRYRUN_TRADES=true to generate intended trades in dry-run mode.",
+            }
+        )
+    else:
+        try:
+            import trade_builder  # scripts/trade_builder.py
+
+            tb = trade_builder.build_trades_for_run(run_id=run_id, asof_date=asof, policy=policy)
+            trade_builder_ok = tb.ok
+            intended_count = tb.intended_count
+            tb_detail.update(tb.detail)
+            tb_detail["reason"] = tb.reason
+            tb_detail["trades_path"] = tb.trades_path
+            if not trade_builder_ok:
+                reasons.append({"code": "TRADE_BUILDER_BLOCKED", "detail": f"Trade-builder did not run cleanly: {tb.reason}"})
+        except Exception as e:
+            trade_builder_ok = False
+            tb_detail["status"] = "error"
+            tb_detail["error"] = (str(e) or "unknown")[:200]
+            reasons.append(
+                {
+                    "code": "TRADE_BUILDER_FAILED",
+                    "detail": "Trade-builder errored; intended trades were not generated (see risk_checks.trade_builder.details).",
+                }
+            )
+
+    risk_checks.append(("trade_builder", trade_builder_ok, tb_detail))
+    if dryrun_trades and trade_builder_ok and intended_count == 0:
+        reasons.append({"code": "NO_REBALANCE", "detail": "Trade-builder produced 0 intended trades (already at target or below min notional)."})
 
     approved = len(reasons) == 0 and all(p for _, p, _ in risk_checks)
     decision_type = "TRADE" if approved else "NO_TRADE"
@@ -337,7 +390,7 @@ def main() -> int:
             "approved": True,
             "decision_type": "TRADE",
             "targets": targets,
-            "trades": [],
+            "intended_trades_count": intended_count,
         }
         out = run_dir / "trades_approved.json"
         out.write_text(json.dumps(approved_payload, indent=2, sort_keys=True), encoding="utf-8")

@@ -246,6 +246,16 @@ riskguard:
 	@chmod +x scripts/riskguard_run.py
 	@python3 scripts/riskguard_run.py $(filter-out $@,$(MAKECMDGOALS))
 
+.PHONY: trade-builder
+trade-builder:
+	@chmod +x scripts/trade_builder.py
+	@set -euo pipefail; \
+	if [[ -n "$${RUN_ID:-}" ]]; then \
+	  python3 scripts/trade_builder.py --run-id "$$RUN_ID"; \
+	else \
+	  python3 scripts/trade_builder.py; \
+	fi
+
 .PHONY: ticket
 ticket:
 	@chmod +x scripts/ticket_render.py

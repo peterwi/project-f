@@ -86,16 +86,17 @@ Run references (current known-good baseline):
   - Done when:
     - Contract is written and agreed by checklist.
 
-- [ ] **M11.2.b Implement `trade_builder` (writes ledger_trades_intended)**
+- [x] **M11.2.b Implement `trade_builder` (writes ledger_trades_intended)**
   - Objective: Deterministically convert `portfolio_targets` + latest prices + cash constraints into `ledger_trades_intended`.
   - Commands:
-    - Implement new script (or extend existing) and wire into `run-1400` behind `DRYRUN_TRADES=true`.
+    - `make run-1400` with `DRYRUN_TRADES=true` (trade-builder runs inside riskguard step)
+    - Optional: `make trade-builder RUN_ID=<run_id>` (manual re-run for a specific run)
   - Verification:
-    - With `DRYRUN_TRADES=true`, a run produces at least one intended BUY/SELL row when targets imply rebalancing.
-    - With default settings, still produces NO_TRADE.
+    - With `DRYRUN_TRADES=true`, run artifacts include `trades_intended.json` and `risk_checks.trade_builder` is present.
+    - With default settings, still produces `NO_TRADE` (trade-builder disabled by default).
   - Artifacts:
-    - `/data/trading-ops/artifacts/runs/<run_id>/trades_intended.json` (or similar)
-    - DB: `ledger_trades_intended` rows for the run
+    - `/data/trading-ops/artifacts/runs/<run_id>/trades_intended.json`
+    - DB: `ledger_trades_intended` rows for the run (may be 0 if no rebalancing / below min notional)
   - Done when:
     - Intended trades are produced deterministically in dry-run mode only.
 

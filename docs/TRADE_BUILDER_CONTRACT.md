@@ -35,13 +35,13 @@ Source: Postgres table `market_prices_eod`
   - Uses `close` as `reference_price` (unless policy specifies otherwise)
   - Must record which `source` was used in artifacts
 
-### Reconciliation gate (hard precondition)
+### Reconciliation (prerequisite for approving TRADE)
 Source: Postgres table `reconciliation_results`
-- Trade-builder is allowed to produce TRADE intentions only if:
-  - At least one row exists with `passed = true`
-- If `reconciliation_results` is empty or has no `passed=true` row:
-  - Trade-builder must return `trade_builder_ok=false` with reason `RECONCILIATION_REQUIRED`
-  - And must write an artifact showing prerequisites failed (see Outputs)
+- Riskguard must only approve a TRADE decision when a recent reconciliation exists and is passing (`passed=true`).
+- Trade-builder may still run deterministically in `DRYRUN_TRADES=true` mode even if reconciliation is missing; in that case:
+  - It must mark `prerequisites.reconciliation_passed=false` in the artifact.
+  - It must use ledger-derived positions/cash (`ledger_positions_current`, `ledger_cash_current`) as a draft sizing source.
+  - Riskguard remains responsible for blocking TRADE until reconciliation passes.
 
 ## Inputs (Policy / Config)
 
@@ -106,7 +106,6 @@ Skip any trade with `abs(notional_value_base) < MIN_NOTIONAL_BASE`.
 ## Failure / Block Reasons (Contract)
 
 Trade-builder must set `trade_builder_ok=false` and include a machine-readable reason string in the artifact when blocked:
-- `RECONCILIATION_REQUIRED` (no `reconciliation_results.passed=true`)
 - `TARGETS_MISSING` (no `portfolio_targets` rows for run)
 - `TARGETS_ASOF_MISMATCH` (`portfolio_targets.asof_date != asof_date_used`)
 - `PRICES_MISSING` (missing price bars for one or more target symbols on `asof_date_used`)
@@ -119,4 +118,3 @@ If prerequisites pass but the computed intended trades are empty due to threshol
 - No external calls (no HTTP, no broker calls, no LLM calls).
 - No randomness; no time-of-day dependence beyond explicitly passed `run_id/asof_date_used`.
 - Default system behavior remains safe (NO_TRADE) unless explicitly enabled via a dry-run toggle in orchestration (to be implemented in M11.2.b+).
-

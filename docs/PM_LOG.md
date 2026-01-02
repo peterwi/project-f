@@ -724,3 +724,23 @@ This file is append-only. Each agent message appends a new entry so the project 
 - Result: PASS
 - Next action:
   - Implement `M11.2.b` (deterministic trade_builder script + wire into `run-1400` behind `DRYRUN_TRADES=true`), using `reconciliation_results.passed=true` as the gate.
+
+## 2026-01-02T22:47:48Z
+
+- Milestone: `M11.2` trade-builder (deterministic; dry-run)
+- Item: `M11.2.b` implement `trade_builder` and wire into `run-1400`
+- What changed:
+  - Added `scripts/trade_builder.py` (writes `/data/trading-ops/artifacts/runs/<run_id>/trades_intended.json` and upserts `ledger_trades_intended`).
+  - Updated `scripts/riskguard_run.py` to:
+    - materialize proposed target weights into `portfolio_targets` for the run
+    - run trade-builder only when `DRYRUN_TRADES=true` (default remains safe / NO_TRADE)
+  - Added `make trade-builder` target.
+- Verification run:
+  - `DRYRUN_TRADES=true make run-1400`
+  - Run: `/data/trading-ops/artifacts/runs/71875fe4-720a-486a-9f31-5d8bcb2f40e2/run_summary.md`
+  - Artifacts:
+    - `/data/trading-ops/artifacts/runs/71875fe4-720a-486a-9f31-5d8bcb2f40e2/trades_proposed.json`
+    - `/data/trading-ops/artifacts/runs/71875fe4-720a-486a-9f31-5d8bcb2f40e2/trades_intended.json`
+- Result: PASS (trade-builder ran deterministically; decision remained `NO_TRADE` due to missing reconciliation + no rebalancing at current account size)
+- Next action:
+  - Start `M11.3.a` (render TRADE lines from intended trades when decision_type becomes TRADE).
