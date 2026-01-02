@@ -35,7 +35,7 @@ Pass definitions:
   - Done when:
     - The failing rule(s) are identified and logged, with the report path.
 
-- [ ] **M10.B.2 Capture a fresh baseline run (0800)**
+- [x] **M10.B.2 Capture a fresh baseline run (0800)**
   - Objective: Run the 08:00 pipeline and capture a reproducible baseline artifact set for debugging.
   - Commands:
     - `git status --porcelain=v1`
@@ -74,7 +74,7 @@ Pass definitions:
   - Done when:
     - The gate stops failing due to symbol mapping.
 
-- [ ] **M10.B.5 Fix “as-of/freshness” day alignment (US T-1 expectation)**
+- [x] **M10.B.5 Fix “as-of/freshness” day alignment (US T-1 expectation)**
   - Objective: Ensure freshness logic aligns with US trading calendar for UK-morning runs (typically expects last US trading day).
   - Commands:
     - Inspect rule implementation and current “as-of” date logic.

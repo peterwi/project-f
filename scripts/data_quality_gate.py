@@ -88,6 +88,32 @@ def _expected_asof_date(today: date) -> date:
     return d
 
 
+def _auto_asof_date(*, expected: date, benchmarks: list[str]) -> date:
+    """
+    Pick the most recent trading_date <= expected that exists in market_prices_eod for benchmark symbols.
+
+    This is a deterministic holiday/weekend fallback: if the expected weekday is a US market holiday,
+    it will select the prior available trading day.
+    """
+    if not benchmarks:
+        return expected
+    quoted = ",".join("'" + b.replace("'", "''") + "'" for b in benchmarks)
+    raw = _psql_capture(
+        f"""
+        select coalesce(max(trading_date)::text, '')
+        from market_prices_eod
+        where internal_symbol in ({quoted})
+          and trading_date <= '{expected.isoformat()}'
+        """
+    )
+    if raw:
+        try:
+            return date.fromisoformat(raw)
+        except ValueError:
+            return expected
+    return expected
+
+
 def _artifacts_root(env: dict[str, str]) -> Path:
     return Path(env.get("ARTIFACTS_DIR", "/data/trading-ops/artifacts")).resolve()
 
@@ -133,8 +159,6 @@ def main() -> int:
     env = _read_env_file(ENV_FILE)
 
     today = datetime.now(timezone.utc).date()
-    expected = _expected_asof_date(today)
-    asof = date.fromisoformat(args.asof_date) if args.asof_date else expected
     run_id = (args.run_id or "").strip()
 
     coverage_min_pct = float(env.get("DATA_COVERAGE_MIN_PCT", "98"))
@@ -148,6 +172,10 @@ def main() -> int:
         "select coalesce(string_agg(internal_symbol, ',' order by internal_symbol), '') from config_universe where lower(coalesce(instrument_type,'')) <> 'stock';"
     )
     benchmark_list = [s for s in benchmark_symbols.split(",") if s] if benchmark_symbols else []
+
+    expected = _expected_asof_date(today)
+    auto_expected = _auto_asof_date(expected=expected, benchmarks=benchmark_list)
+    asof = date.fromisoformat(args.asof_date) if args.asof_date else auto_expected
 
     issues: list[str] = []
 
@@ -221,7 +249,9 @@ def main() -> int:
     lines.append("# Data Quality Gate Report")
     lines.append("")
     lines.append(f"- Generated at (UTC): `{ts}`")
-    lines.append(f"- Expected date (v1 rule): `{expected.isoformat()}`")
+    lines.append(f"- Expected date (weekday rule): `{expected.isoformat()}`")
+    if auto_expected != expected:
+        lines.append(f"- Auto expected date (holiday fallback): `{auto_expected.isoformat()}`")
     lines.append(f"- As-of date used: `{asof.isoformat()}`")
     lines.append(f"- Coverage threshold: `{coverage_min_pct:.2f}%`")
     lines.append(f"- Enabled symbols: `{enabled_count}`")

@@ -645,3 +645,25 @@ This file is append-only. Each agent message appends a new entry so the project 
     - As-of date: `2026-01-01`
 - Next action:
   - Execute `M10.B.2`: run `make run-0800` to capture a fresh baseline report for debugging (then fix ingestion/universe/benchmark coverage root cause).
+
+## 2026-01-02T21:45:53Z
+
+- Milestone: `M10.B` (data quality)
+- Chunk: `M10.B.2` + first root-cause fix (`M10.B.5`)
+- Commands executed:
+  - `make run-0800` (baseline)
+  - Inspect newest artifacts:
+    - `/data/trading-ops/artifacts/runs/5c98d101-4bd1-42fe-a75b-2aaa49b2aa5b/run_summary.md`
+    - `/data/trading-ops/artifacts/reports/data_quality_2026-01-01_20260102T214007Z.md`
+  - Apply fix: update `scripts/data_quality_gate.py` expected-date logic to auto-select the most recent trading date `<=` the weekday-expected date based on benchmark bars (deterministic holiday fallback).
+  - `make run-0800` (re-run after fix)
+- Result: PASS (data-quality now passes on US holiday)
+  - Baseline failure (asof `2026-01-01`):
+    - Coverage 0.00% and missing benchmark bars for `QQQ, SPY`
+  - After fix:
+    - New run: `cb9f53e9-1e33-4b7a-b7b3-c3a9508c84ba`
+    - Data-quality report (PASS):
+      - `/data/trading-ops/artifacts/reports/data_quality_2025-12-31_20260102T214520Z.md`
+    - Report shows weekday-expected `2026-01-01` and auto fallback `2025-12-31`.
+- Next action:
+  - Execute `M10.B.7`: run `make run-1400` (no refetch) and confirm data-quality does not fail.
