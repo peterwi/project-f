@@ -6,6 +6,11 @@
 # Tooling
 /.serena/
 
+# RD-Agent / LiteLLM local artifacts
+/log/
+/selector.log
+/prompt_cache.db
+
 # Local secrets
 /config/secrets.env
 

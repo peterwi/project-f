@@ -383,14 +383,25 @@ Non-negotiables (must remain true always):
 - [ ] **M9.2 Run RD-Agent in dry-run repo audit mode (no changes applied)**
   - Objective: Prove RD-Agent can analyze and propose without modifying repo state.
   - Commands:
-    - (to be implemented when RD-Agent is installed locally)
+    - Install RD-Agent into a dedicated `/data` venv:
+      - `sudo mkdir -p /data/trading-ops/venvs && sudo chown "$USER:$USER" /data/trading-ops/venvs`
+      - `python3 -m venv /data/trading-ops/venvs/rdagent`
+      - `source /data/trading-ops/venvs/rdagent/bin/activate && pip install -U pip && pip install rdagent`
+    - Run audit-only (write artifacts only; no repo changes applied):
+      - `RD_AGENT_RUN_ID="$(date -u +%Y%m%d-%H%M%SZ)-rd-audit-git$(git rev-parse --short HEAD 2>/dev/null || echo nogit)"`
+      - `mkdir -p "/data/trading-ops/artifacts/rd-agent/$RD_AGENT_RUN_ID"`
+      - `git status --porcelain=v1`
+      - Run RD-Agent in an isolated copy (`git worktree` or `/tmp` rsync) and write:
+        - `/data/trading-ops/artifacts/rd-agent/$RD_AGENT_RUN_ID/outputs.md`
+        - `/data/trading-ops/artifacts/rd-agent/$RD_AGENT_RUN_ID/patch.diff` (optional)
   - Verification:
     - RD-Agent produces audit artifacts under `/data/trading-ops/artifacts/rd-agent/<run_id>/` and no repo files change.
+    - `git status --porcelain=v1` remains clean (or only expected local-only files).
   - Artifacts:
     - `/data/trading-ops/artifacts/rd-agent/<run_id>/outputs.md`
     - `/data/trading-ops/artifacts/rd-agent/<run_id>/patch.diff` (optional)
   - Blocker:
-    - RD-Agent is not installed/available in this environment yet; install/configure RD-Agent and rerun.
+    - RD-Agent installed, but the OpenAI key in `./open-ai.key` currently fails with quota errors; replace/refresh key and rerun.
 
 - [ ] **M9.3 Allow RD-Agent to propose one patch and validate via checklist**
   - Objective: Run the full workflow: proposal → human review → apply → verify → log.

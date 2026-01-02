@@ -519,3 +519,39 @@ This file is append-only. Each agent message appends a new entry so the project 
 - Blockers:
   - `rd_agent_not_installed`
   - `requires_escalated_docker_socket_access`
+
+## 2026-01-02T20:23:30Z
+
+- Milestone / checklist: attempted `M9.2` (RD-Agent dry-run repo audit); next remains `M9.2`
+- What changed:
+  - Installed Microsoft RD-Agent into a dedicated /data venv:
+    - `/data/trading-ops/venvs/rdagent/`
+  - Created a new audit run folder under `/data`:
+    - `/data/trading-ops/artifacts/rd-agent/20260102-201706Z-rd-audit-git8185236/`
+  - Updated: `.gitignore` (ignore RD-Agent local artifacts like `log/` and `selector.log`)
+  - Updated: `docs/CHECKLIST.md` (added concrete commands + updated blocker for `M9.2`)
+  - Updated: `docs/PM_STATE.md` (updated blockers + `LAST_RD_AGENT_RUN_ID`)
+- Commands executed (key):
+  - `sudo mkdir -p /data/trading-ops/venvs && sudo chown "$USER:$USER" /data/trading-ops/venvs`
+  - `python3 -m venv /data/trading-ops/venvs/rdagent`
+  - `source /data/trading-ops/venvs/rdagent/bin/activate && pip install rdagent`
+  - `git worktree add --detach /tmp/rdagent-audit-<run_id> HEAD` (isolated repo copy)
+  - Attempted RD-Agent LLM call using the OpenAI key from `./open-ai.key`
+- Verification outputs (summary + paths):
+  - Run folder exists and contains required placeholders after failure:
+    - `/data/trading-ops/artifacts/rd-agent/20260102-201706Z-rd-audit-git8185236/AUDIT.md`
+    - `/data/trading-ops/artifacts/rd-agent/20260102-201706Z-rd-audit-git8185236/BACKLOG.md`
+    - `/data/trading-ops/artifacts/rd-agent/20260102-201706Z-rd-audit-git8185236/RISKS.md`
+    - `/data/trading-ops/artifacts/rd-agent/20260102-201706Z-rd-audit-git8185236/REPRO_STEPS.md`
+    - `/data/trading-ops/artifacts/rd-agent/20260102-201706Z-rd-audit-git8185236/outputs.md` (error summary)
+  - Git status during the attempt was captured:
+    - `/data/trading-ops/artifacts/rd-agent/20260102-201706Z-rd-audit-git8185236/git_status_main_before.txt`
+    - `/data/trading-ops/artifacts/rd-agent/20260102-201706Z-rd-audit-git8185236/git_status_main_after.txt`
+- Result: FAIL
+  - Why: OpenAI API returned quota errors, so RD-Agent could not generate the audit content.
+- Next action:
+  - Keep `CURRENT_CHECKLIST_ITEM=M9.2` and re-run after replacing/refreshing `./open-ai.key` with a key that has active quota.
+- Blockers:
+  - `openai_quota_exceeded` (requires a valid key with active quota)
+  - `openai_key_exposed_in_command_output_rotate_required` (RD-Agent printed settings including the key; rotate immediately)
+  - `requires_escalated_docker_socket_access` (unchanged; not exercised in M9.2)
