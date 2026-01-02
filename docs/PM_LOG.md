@@ -192,3 +192,19 @@ This file is append-only. Each agent message appends a new entry so the project 
   - Execute `M6.1`
 - Blockers:
   - Docker socket access still requires escalated execution for this agent session.
+
+## 2026-01-02T14:31:00Z
+
+- Milestone / checklist: documentation maintenance; next remains `M6.1`
+- What changed:
+  - Updated: `docs/CHECKLIST.md` (added `--env-file config/secrets.env` to `M3.1` and `M3.2` docker compose commands for correctness)
+- Commands executed (high level):
+  - `git commit -m "Checklist: add env-file to M3 commands"`
+- Verification outputs (summary):
+  - `docs/CHECKLIST.md` now matches how docker compose must be invoked (compose parses full file and requires env interpolation).
+- Result: PASS
+  - Why: Checklist commands are now directly runnable without hidden assumptions.
+- Next action:
+  - Execute `M6.1`
+- Blockers:
+  - Docker socket access still requires escalated execution for this agent session.
