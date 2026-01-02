@@ -22,3 +22,19 @@ services:
       timeout: 3s
       retries: 20
       start_period: 10s
+
+  qlib-runner:
+    build:
+      context: ..
+      dockerfile: docker/qlib-runner/Dockerfile
+    image: trading-ops/qlib-runner:local
+    container_name: trading-ops-qlib-runner
+    working_dir: /work
+    user: "${UID:-1000}:${GID:-1000}"
+    environment:
+      TZ: ${TZ:-UTC}
+    volumes:
+      - "/data/qlib:/data/qlib"
+      - "/data/artifacts/trading-ops/qlib-shadow:/data/artifacts/trading-ops/qlib-shadow"
+      - "..:/repo:ro"
+    entrypoint: ["/bin/bash", "-lc"]

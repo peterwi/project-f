@@ -74,3 +74,25 @@ This file is append-only. Each agent message appends a new entry so the project 
   - Execute `M2.1`
 - Blockers:
   - Docker socket access still requires escalated execution for this agent session (non-escalated docker calls fail).
+
+## 2026-01-02T13:48:01Z
+
+- Milestone / checklist: completed `M2.1`; next is `M2.2`
+- What changed:
+  - Created: `docker/qlib-runner/Dockerfile`
+  - Updated: `docker/compose.yml` (added `qlib-runner` service)
+  - Updated: `docs/CHECKLIST.md` (marked `M2.1` as DONE)
+  - Updated: `docs/PM_STATE.md` (resume pointer advanced to `M2.2`)
+- Commands executed (high level):
+  - `ls -la docs/QLIB_DOCKER_EXECUTION_SPEC.md`
+  - `test -f docker/qlib-runner/Dockerfile`
+  - `rg -n "qlib-runner" docker/compose.yml`
+- Verification outputs (summary):
+  - `docker/qlib-runner/Dockerfile` exists
+  - `docker/compose.yml` contains `qlib-runner` service
+- Result: PASS
+  - Why: Qlib runner is now defined and ready to build.
+- Next action:
+  - Execute `M2.2` (build `qlib-runner` image)
+- Blockers:
+  - Docker build will require network access to fetch apt/pip deps (network is restricted; may require approval).

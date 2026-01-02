@@ -95,7 +95,7 @@ Non-negotiables (must remain true always):
 
 ## M2 — Qlib docker runner (build image, install deps, import qlib)
 
-- [ ] **M2.1 Implement `qlib-runner` container (Dockerfile + compose service)**
+- [x] **M2.1 Implement `qlib-runner` container (Dockerfile + compose service)**
   - Objective: Create a reproducible container that can run `python -m qlib.cli.data` and `qrun`.
   - Commands:
     - `ls -la docs/QLIB_DOCKER_EXECUTION_SPEC.md`
