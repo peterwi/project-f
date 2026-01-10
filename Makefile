@@ -38,6 +38,7 @@ help:
 	@echo "  make confirm          # submit ticket confirmation (defaults LAST_TICKET_ID)"
 	@echo "  make run-0800         # scheduled 08:00 UK pipeline run"
 	@echo "  make run-1400         # scheduled 14:00 UK pipeline run (NO refetch)"
+	@echo "  make artifacts-retention # dry-run cleanup of old artifacts"
 	@echo "  make alerts-last      # print last 20 alerts"
 	@echo "  make runs-last        # print last 5 runs (DB schema-safe)"
 	@echo "  make tickets-last     # print last 5 tickets (DB schema-safe)"
@@ -295,6 +296,10 @@ run-0800:
 .PHONY: run-1400
 run-1400:
 	@python3 scripts/run_scheduled.py --cadence 1400
+
+.PHONY: artifacts-retention
+artifacts-retention:
+	@python3 scripts/artifacts_retention.py
 
 .PHONY: alerts-last
 alerts-last:

@@ -454,7 +454,7 @@ Non-negotiables (must remain true always):
   - Artifacts:
     - `/data/trading-ops/artifacts/tickets/<ticket_id>/ticket.md`
 
-- [ ] **M12.3 Scheduler validation + log retention (file-only)**
+- [x] **M12.3 Scheduler validation + log retention (file-only)**
   - Objective: Validate scheduled 08:00/14:00 runs are operating and keep logs/artifacts bounded on disk.
   - Commands:
     - `docker ps`

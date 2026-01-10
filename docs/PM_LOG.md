@@ -1254,3 +1254,76 @@ This file is append-only. Each agent message appends a new entry so the project 
   - `make tickets-last`
   - `git status --porcelain=v1`
   - `git log -1 --oneline`
+
+## 2026-01-10T20:34:40Z
+
+- Milestone: `M12.3` scheduler + determinism hardening
+- Item: `M12.3.a` resume pointer + last log entry
+- Commands executed:
+  - `cat docs/PM_STATE.md`
+  - `tail -n 40 docs/PM_LOG.md`
+- Decision:
+  - Proceed with cadence verification (08:00 includes market-fetch; 14:00 must not refetch) and ticket determinism smoke tests.
+
+## 2026-01-10T20:43:12Z
+
+- Milestone: `M12.3` scheduler + determinism hardening
+- Item: `M12.3.a` baseline cadence verification (manual run)
+- Commands executed:
+  - `docker compose ... ps`
+  - `make run-0800`
+  - `make tickets-last`
+  - `make run-1400`
+  - `make tickets-last`
+  - `rg -n "market-fetch|market_fetch|FETCH" -S scripts/run_ops.py scripts/* || true`
+- Outputs:
+  - 08:00 run_id: `c4e67ecc-daff-483e-9019-3d4dce16278a`
+  - 14:00 run_id: `7e86756c-40f2-4d04-a4be-22c3eefc015f`
+  - 14:00 default ticket: `91ea1a6e-3907-5dc3-b363-d69f4fbb1ba4` (NO_TRADE)
+- Finding:
+  - `scripts/run_scheduled.py` contains a cadence guard: `market-fetch` runs only when `--cadence 0800`.
+
+## 2026-01-10T20:44:30Z
+
+- Milestone: `M12.3` scheduler + determinism hardening
+- Item: `M12.3.b` proof that 14:00 does not refetch market data
+- Proof (code + artifacts):
+  - Code: `scripts/run_scheduled.py` runs `market-fetch` only under `if args.cadence == "0800": ...`.
+  - Artifact: 08:00 run_summary contains `- market-fetch: \`OK\``; 14:00 run_summary contains no `market-fetch` step.
+
+## 2026-01-10T20:45:20Z
+
+- Milestone: `M12.3` scheduler + determinism hardening
+- Item: `M12.3.c1` determinism smoke test (TRADE ticket formatting)
+- Commands executed:
+  - `python3 scripts/confirmations_submit.py --ticket-id <latest_trade> --fills-json ... --notes DRYRUN_SKIPPED` (unblocks next dry-run)
+  - `DRYRUN_TRADES=true make run-1400` (twice; with confirmation between)
+  - Diff intended-trades sections between the two newest TRADE tickets
+  - Diff universe sections between the two newest TRADE tickets
+- Outputs:
+  - 08:00 run_id: `c4e67ecc-daff-483e-9019-3d4dce16278a`
+  - 14:00 run_id: `7e86756c-40f2-4d04-a4be-22c3eefc015f` (default safe NO_TRADE)
+  - DRYRUN TRADE tickets compared:
+    - `3ee51949-fe98-52a9-b4e5-10dc45728f1f` (run `2ff72329-fd40-48e2-848a-3e43e2d6d109`)
+    - `d931ac84-7901-591a-9bf5-c149436bc265` (run `1bef6220-e454-46da-a140-b2315c7699bb`)
+  - Diff result: PASS (no differences in Intended trades or Universe blocks; ordering/rounding stable)
+
+## 2026-01-10T20:48:29Z
+
+- Milestone: `M12.3` scheduler + determinism hardening
+- Item: `M12.3.d` retention helper (file-only; dry-run by default)
+- Commands executed:
+  - `python3 scripts/artifacts_retention.py`
+- Output:
+  - `PLAN_ITEMS=0` (no deletions suggested at current timestamps/thresholds)
+- Decision:
+  - Mark `M12.3` complete and proceed to `M12.4` day simulation script next.
+
+## 2026-01-10T20:49:40Z
+
+- Milestone: `M12.3` scheduler + determinism hardening
+- Item: `M12.3.e` commit
+- Commands executed:
+  - `git commit -m "M12.3: verify scheduler cadence + ticket determinism"`
+- Output:
+  - Commit: `b737e09`

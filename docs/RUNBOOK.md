@@ -64,6 +64,20 @@ Runs the current deterministic gates end-to-end. Produces a run summary under `/
 - NO_TRADE ack (daily close-out): `make confirm`
 - TRADE fills (after manual execution): `FILLS_JSON=/path/to/fills.json make confirm-fills`
 
+## Retention (file-only; dry-run by default)
+To keep disk usage bounded, prune old non-critical artifacts.
+
+- Dry-run: `make artifacts-retention`
+- Apply deletion: `python3 scripts/artifacts_retention.py --apply`
+
+What it deletes (when `--apply`):
+- Old `scheduled-0800` run directories under `/data/trading-ops/artifacts/runs/` (default: older than 14 days).
+- Old non-reconciliation reports under `/data/trading-ops/artifacts/reports/` (default: older than 30 days).
+
+What it keeps:
+- All tickets + confirmations under `/data/trading-ops/artifacts/tickets/`
+- All reconciliation reports (`reconcile_*.md`)
+
 ### Backup schedule
 - Install daily systemd timer: `make install-backup-timer`
 - Check timer: `systemctl status trading-ops-db-backup.timer --no-pager`
