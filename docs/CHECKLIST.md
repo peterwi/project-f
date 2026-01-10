@@ -470,6 +470,7 @@ Non-negotiables (must remain true always):
     - Confirm `material_hash` exists: `/data/trading-ops/artifacts/tickets/<ticket_id>/material_hash.txt`
   - Verification:
     - Two back-to-back TRADE tickets show no ordering/format drift (ignoring run/ticket ids, pointers, and timestamps).
+    - Two consecutive DRYRUN TRADE runs with identical intended trades produce the same `meta.material_hash` (economic-only; ignores ids/paths/timestamps).
     - `ticket.json` includes `meta.material_hash` and `ticket.md` displays it.
   - Artifacts:
     - `/data/trading-ops/artifacts/tickets/<ticket_id>/material_hash.txt`

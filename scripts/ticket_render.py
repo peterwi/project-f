@@ -9,6 +9,7 @@ import sys
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
 
@@ -21,6 +22,151 @@ RUNS_DIR = Path("/data/trading-ops/artifacts/runs")
 TICKETS_DIR = Path("/data/trading-ops/artifacts/tickets")
 
 TICKET_NAMESPACE = uuid.UUID("7d6dbdd0-3a1d-4ad9-a119-09b73a9a8db1")
+
+def _fmt_decimal(value: object, decimals: int) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        d = Decimal(value)
+    elif isinstance(value, float):
+        d = Decimal(str(value))
+    elif isinstance(value, str):
+        if not value.strip():
+            return None
+        d = Decimal(value.strip())
+    else:
+        return None
+
+    q = Decimal(1).scaleb(-max(0, int(decimals)))
+    d = d.quantize(q, rounding=ROUND_HALF_UP)
+    s = format(d, "f")
+    if decimals > 0:
+        s = s.rstrip("0").rstrip(".")
+    return s
+
+
+def _economic_material_input(payload: dict) -> dict:
+    universe = payload.get("universe") or {}
+    enabled_symbols = list(universe.get("enabled_symbols") or [])
+    benchmark_symbols = list(universe.get("benchmark_symbols") or [])
+    enabled_symbols.sort()
+    benchmark_symbols.sort()
+
+    order = {
+        "data_quality": 10,
+        "reconciliation": 20,
+        "confirmations": 30,
+        "universe_verified": 40,
+        "ledger_ready": 50,
+        "trade_builder": 60,
+    }
+    risk_checks_in = (payload.get("gate_statuses") or {}).get("risk_checks") or []
+    risk_checks: list[dict] = []
+    for rc in risk_checks_in:
+        if not isinstance(rc, dict):
+            continue
+        name = str(rc.get("name") or "").strip()
+        if not name:
+            continue
+        passed = bool(rc.get("passed", False))
+        risk_checks.append({"name": name, "passed": passed})
+    risk_checks = [rc for rc in risk_checks if rc["name"] in order]
+    risk_checks.sort(key=lambda r: (order.get(r["name"], 999), r["name"]))
+
+    reason_codes: list[str] = []
+    for r in payload.get("blocking_reasons") or []:
+        if not isinstance(r, dict):
+            continue
+        code = str(r.get("code") or "").strip()
+        if code:
+            reason_codes.append(code)
+    reason_codes = sorted(set(reason_codes))
+
+    base_currency = str(payload.get("base_currency") or "GBP")
+
+    intended_in = list(payload.get("intended_trades") or [])
+    intended: list[dict] = []
+    for t in intended_in:
+        if not isinstance(t, dict):
+            continue
+        side = str(t.get("side") or "").upper().strip() or None
+        sym = str(t.get("internal_symbol") or "").strip() or None
+        if not sym or not side:
+            continue
+        units_s = _fmt_decimal(t.get("units"), 6)
+        notional_s = _fmt_decimal(t.get("notional_value_base"), 2)
+        limit_s = _fmt_decimal(t.get("limit_price"), 4)
+        ref_s = _fmt_decimal(t.get("reference_price"), 4)
+        intended.append(
+            {
+                "internal_symbol": sym,
+                "side": side,
+                "order_type": (str(t.get("order_type") or "").strip() or None),
+                "units": units_s,
+                "notional_value_base": notional_s,
+                "limit_price": limit_s,
+                "reference_price": ref_s,
+                "max_slippage_bps": (int(t["max_slippage_bps"]) if isinstance(t.get("max_slippage_bps"), int) else None),
+            }
+        )
+    side_order = {"BUY": 0, "SELL": 1}
+    intended.sort(
+        key=lambda t: (
+            t["internal_symbol"],
+            side_order.get(t["side"], 9),
+            str(t.get("order_type") or ""),
+            str(t.get("units") or ""),
+            str(t.get("notional_value_base") or ""),
+            str(t.get("limit_price") or ""),
+            str(t.get("reference_price") or ""),
+            int(t.get("max_slippage_bps") or -1),
+        )
+    )
+
+    fills_in = list(payload.get("confirmed_fills") or [])
+    fills: list[dict] = []
+    for f in fills_in:
+        if not isinstance(f, dict):
+            continue
+        sym = str(f.get("internal_symbol") or "").strip() or None
+        side = str(f.get("side") or "").upper().strip() or None
+        status = str(f.get("executed_status") or "").strip() or None
+        if not sym or not side or not status:
+            continue
+        fills.append(
+            {
+                "internal_symbol": sym,
+                "side": side,
+                "executed_status": status,
+                "units": _fmt_decimal(f.get("units"), 6),
+                "fill_price": _fmt_decimal(f.get("fill_price"), 4),
+                "executed_value_base": _fmt_decimal(f.get("executed_value_base"), 2),
+            }
+        )
+    fills.sort(
+        key=lambda x: (
+            x["internal_symbol"],
+            x["side"],
+            x["executed_status"],
+            str(x.get("units") or ""),
+            str(x.get("fill_price") or ""),
+            str(x.get("executed_value_base") or ""),
+        )
+    )
+
+    return {
+        "schema": "economic_v1",
+        "decision_type": str(payload.get("decision_type") or ""),
+        "asof_date": str(payload.get("asof_date") or ""),
+        "base_currency": base_currency,
+        "universe": {"enabled_symbols": enabled_symbols, "benchmark_symbols": benchmark_symbols},
+        "risk_checks": risk_checks,
+        "blocking_reason_codes": reason_codes,
+        "intended_trades": intended,
+        "confirmed_fills": fills,
+    }
 
 
 def _read_kv_file(path: Path) -> dict[str, str]:
@@ -623,14 +769,12 @@ def main() -> int:
         "outputs": outputs,
     }
 
-    # Deterministic material hash over ticket payload excluding volatile timestamps.
-    material_payload = json.loads(json.dumps(payload, sort_keys=True))
-    material_payload.pop("created_utc", None)
-    material_payload.pop("meta", None)
+    material_input = _economic_material_input(payload)
     material_hash = hashlib.sha256(
-        json.dumps(material_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        json.dumps(material_input, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     payload.setdefault("meta", {})["material_hash"] = material_hash
+    payload.setdefault("meta", {})["material_schema"] = str(material_input.get("schema") or "economic_v1")
 
     md = _render_ticket_md(payload)
     ticket_md_path = Path(outputs["ticket_md"])
