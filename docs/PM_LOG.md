@@ -1119,6 +1119,107 @@ This file is append-only. Each agent message appends a new entry so the project 
 - Output:
   - Commit: `6b93532`
 
+## 2026-01-10T20:26:36Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.b` resume pointer + stale reconciliation investigation
+- Commands executed:
+  - `cat docs/PM_STATE.md`
+  - `tail -n 40 docs/PM_LOG.md`
+- Observation:
+  - Tickets can show `asof_date=2026-01-09` while reconciliation `report_path` points to `snapshot_date=2026-01-02` yet passes.
+- Decision:
+  - Re-open `M12.2` and tighten reconciliation gating: require PASS reconciliation matching the current run `asof_date` (default strict same-day).
+
+## 2026-01-10T20:27:00Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.b1` fact-finding (reconciliation tables + recent results)
+- Commands executed:
+  - `psql \\d+ reconciliation_snapshots`
+  - `psql \\d+ reconciliation_results`
+  - `select ... from reconciliation_results join reconciliation_snapshots ... limit 5;`
+  - `make tickets-last`
+- Finding:
+  - Latest reconciliation PASS results are for `snapshot_date=2026-01-02`, while tickets/runs are using `asof_date=2026-01-09`.
+- Decision:
+  - Implement strict reconciliation matching in `scripts/riskguard_run.py` (PASS must match run asof_date; default strict same-day).
+
+## 2026-01-10T20:28:10Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.b2` implement strict reconciliation matching
+- What changed:
+  - `scripts/riskguard_run.py` reconciliation check now requires a PASS reconciliation where `snapshot_date` matches the current run `asof_date` (default strict same-day).
+  - Optional override: `RECONCILE_MAX_AGE_DAYS` (default `0`).
+- Decision:
+  - Verify behavior: without same-day reconciliation, both default and DRYRUN runs must be `NO_TRADE` with `RECONCILIATION_REQUIRED`.
+
+## 2026-01-10T20:28:31Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.c1` verify default safety (no same-day reconciliation → NO_TRADE)
+- Commands executed:
+  - `make run-1400`
+  - `make tickets-last`
+- Output:
+  - Ticket: `915a6b7d-faf2-522f-9067-6d2063f71ead` (run `b024f9fa-de4a-4a21-bc23-4b71dc8e2023`)
+- Verification:
+  - `no_trade.json` includes `RECONCILIATION_REQUIRED` with details showing latest PASS snapshot_date `2026-01-02` vs expected `2026-01-09`.
+
+## 2026-01-10T20:29:15Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.c2` attempt same-day reconciliation (as instructed)
+- Commands executed:
+  - `make reconcile-add -- --snapshot-date 2026-01-09 --cash-gbp 0`
+  - `make reconcile-run`
+- Result: FAIL (expected; cash/positions snapshot did not match ledger)
+- Artifact:
+  - `/data/trading-ops/artifacts/reports/reconcile_2026-01-09_20260110T202915Z.md`
+
+## 2026-01-10T20:29:46Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.c3` create passing same-day reconciliation (deterministic from ledger for test)
+- Commands executed:
+  - Query ledger views: `ledger_cash_current`, `ledger_positions_current`
+  - `make reconcile-add -- --snapshot-date 2026-01-09 --cash-gbp <ledger_cash_current> --position <ledger_positions_current...> --notes AUTOGEN_FROM_LEDGER_FOR_TEST`
+  - `make reconcile-run`
+- Result: PASS
+- Artifact:
+  - `/data/trading-ops/artifacts/reports/reconcile_2026-01-09_20260110T202946Z.md`
+
+## 2026-01-10T20:30:13Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.c4` verify DRYRUN TRADE requires same-day reconciliation
+- Commands executed:
+  - `DRYRUN_TRADES=true make run-1400`
+  - `make tickets-last`
+- Output:
+  - TRADE ticket: `b775de00-9574-546c-b937-7b99a3a4f986` (run `4f784446-c205-4f92-9593-b029e2cd2da7`, asof `2026-01-09`)
+
+## 2026-01-10T20:31:06Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.c5` verify safe-by-default remains NO_TRADE
+- Commands executed:
+  - `make run-1400`
+  - `make tickets-last`
+- Output:
+  - NO_TRADE ticket: `d91ca72e-7357-5136-bdbf-b18e26e565a2` (run `5c9e2cf4-cf96-4169-a5c7-e5230c7265eb`, asof `2026-01-09`)
+
+## 2026-01-10T20:32:05Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.d` repo hygiene + pointer advance
+- What changed:
+  - Added `resume-*.txt` to `.gitignore` (local-only scratch).
+  - Advanced `docs/PM_STATE.md` pointer to `M12.3.a_SCHEDULER_VALIDATION_RETENTION`.
+- Decision:
+  - Commit strict reconciliation gating fix + repo hygiene.
+
 ## 2026-01-10T20:03:26Z
 
 - Milestone: `M12.2` ticket polish/stability
@@ -1133,3 +1234,23 @@ This file is append-only. Each agent message appends a new entry so the project 
   - TRADE ticket: `a4df07ac-02d7-5647-b0e0-15ee2b86dcf6` (run `690ca4c4-afad-45ba-b7d0-b747519e41c7`, asof `2026-01-09`)
 - Decision:
   - Proceed to inspect both `ticket.md` files and evaluate determinism/polish criteria.
+
+## 2026-01-10T20:33:10Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.e` commit strict reconciliation gating
+- Commands executed:
+  - `git add .gitignore docs/PM_LOG.md docs/PM_STATE.md scripts/riskguard_run.py`
+  - `git commit -m "M12.2: require same-day reconciliation for TRADE tickets"`
+- Decision:
+  - Record final verification outputs (tickets + latest reconciliation rows) for audit.
+
+## 2026-01-10T20:33:30Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.f` final verification snapshot (post-fix)
+- Commands executed:
+  - `select ... from reconciliation_results join reconciliation_snapshots ... limit 5;`
+  - `make tickets-last`
+  - `git status --porcelain=v1`
+  - `git log -1 --oneline`

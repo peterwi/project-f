@@ -114,6 +114,16 @@ def _bool_env(name: str, default: bool = False) -> bool:
     return v in ("1", "true", "t", "yes", "y", "on")
 
 
+def _int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except Exception:
+        return default
+
+
 def _emit_alert_blocked(*, run_id: str, asof: str, reasons: list[dict], risk_checks: list[tuple[str, bool, dict]], run_dir: Path, no_trade_path: Path, proposed_path: Path) -> None:
     details = {
         "run_id": run_id,
@@ -206,25 +216,74 @@ def main() -> int:
 
     reconcile_required = bool(policy.get("reconcile", {}).get("required", True))
     reconcile_ok = True
-    reconcile_detail: dict = {"required": reconcile_required}
+    max_age_days = max(0, _int_env("RECONCILE_MAX_AGE_DAYS", 0))
+    reconcile_detail: dict = {"required": reconcile_required, "max_age_days": max_age_days, "expected_asof": (asof or None)}
     if reconcile_required:
-        last_rec = _psql_capture(
-            "select coalesce(passed::text,'') || '|' || coalesce(report_path,'') from reconciliation_results order by evaluated_at desc limit 1;"
-        )
-        if not last_rec:
+        if not asof:
             reconcile_ok = False
-            reconcile_detail["status"] = "missing"
+            reconcile_detail["status"] = "missing_asof_date"
         else:
-            passed_s, report_path = last_rec.split("|", 1)
-            reconcile_ok = passed_s.strip().lower() in ("t", "true", "1", "yes")
-            reconcile_detail["status"] = "present"
-            reconcile_detail["passed"] = reconcile_ok
-            reconcile_detail["report_path"] = report_path
+            # Latest passing reconciliation within allowed staleness window (default strict same-day).
+            window_rec = _psql_capture(
+                f"""
+                select
+                  coalesce(to_char(r.evaluated_at at time zone 'utc','YYYY-MM-DD"T"HH24:MI:SS"Z"'),'') || '|' ||
+                  coalesce(s.snapshot_date::text,'') || '|' ||
+                  coalesce(r.report_path,'')
+                from reconciliation_results r
+                join reconciliation_snapshots s on s.snapshot_id = r.snapshot_id
+                where r.passed = true
+                  and s.snapshot_date between ('{asof}'::date - interval '{max_age_days} days') and '{asof}'::date
+                order by r.evaluated_at desc
+                limit 1;
+                """
+            )
+            latest_pass = _psql_capture(
+                """
+                select
+                  coalesce(to_char(r.evaluated_at at time zone 'utc','YYYY-MM-DD"T"HH24:MI:SS"Z"'),'') || '|' ||
+                  coalesce(s.snapshot_date::text,'') || '|' ||
+                  coalesce(r.report_path,'')
+                from reconciliation_results r
+                join reconciliation_snapshots s on s.snapshot_id = r.snapshot_id
+                where r.passed = true
+                order by r.evaluated_at desc
+                limit 1;
+                """
+            )
+
+            reconcile_detail["status"] = "stale_or_missing"
+            if latest_pass:
+                lp_eval, lp_date, lp_path = latest_pass.split("|", 2)
+                reconcile_detail.update(
+                    {
+                        "latest_pass_snapshot_date": (lp_date.strip() or None),
+                        "latest_pass_evaluated_at_utc": (lp_eval.strip() or None),
+                        "latest_pass_report_path": (lp_path.strip() or None),
+                    }
+                )
+
+            if not window_rec:
+                reconcile_ok = False
+            else:
+                ev_utc, snap_date, report_path = window_rec.split("|", 2)
+                snap_date = snap_date.strip()
+                reconcile_ok = True if (max_age_days > 0) else (snap_date == asof)
+                reconcile_detail.update(
+                    {
+                        "status": "present",
+                        "passed": reconcile_ok,
+                        "snapshot_date": (snap_date or None),
+                        "evaluated_at_utc": (ev_utc.strip() or None),
+                        "report_path": (report_path.strip() or None),
+                    }
+                )
+
         if not reconcile_ok:
             reasons.append(
                 {
                     "code": "RECONCILIATION_REQUIRED",
-                    "detail": "Reconciliation required by policy but no passing reconciliation result exists.",
+                    "detail": "Reconciliation required by policy but no passing reconciliation result exists for the run asof_date (or within allowed staleness window).",
                 }
             )
     risk_checks.append(("reconciliation", reconcile_ok, reconcile_detail))

@@ -44,3 +44,6 @@
 # Local prompts / scratch
 /agent-instructions-*.txt
 /=*
+
+# local scratch
+resume-*.txt
