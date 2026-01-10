@@ -463,7 +463,18 @@ Non-negotiables (must remain true always):
     - Scheduler is running and emitting expected cadence logs.
     - Retention mechanism exists (file-only) and is documented (what it deletes, what it keeps).
 
-- [ ] **M12.4 End-to-end “day simulation” script**
+- [x] **M12.4.a Ticket determinism polish + material hash**
+  - Objective: Ensure ticket material content is stable and auditable; add a deterministic material hash that ignores volatile timestamps.
+  - Commands:
+    - `DRYRUN_TRADES=true make run-1400 && make tickets-last`
+    - Confirm `material_hash` exists: `/data/trading-ops/artifacts/tickets/<ticket_id>/material_hash.txt`
+  - Verification:
+    - Two back-to-back TRADE tickets show no ordering/format drift (ignoring run/ticket ids, pointers, and timestamps).
+    - `ticket.json` includes `meta.material_hash` and `ticket.md` displays it.
+  - Artifacts:
+    - `/data/trading-ops/artifacts/tickets/<ticket_id>/material_hash.txt`
+
+- [ ] **M12.4.b End-to-end “day simulation” script**
   - Objective: One deterministic command to simulate a full day: 08:00 fetch → reconcile → 14:00 ticket → confirm → reconcile report.
   - Commands:
     - `bash scripts/day_simulate.sh --date YYYY-MM-DD --dryrun-trades`

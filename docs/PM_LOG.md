@@ -1327,3 +1327,64 @@ This file is append-only. Each agent message appends a new entry so the project 
   - `git commit -m "M12.3: verify scheduler cadence + ticket determinism"`
 - Output:
   - Commit: `b737e09`
+
+## 2026-01-10T21:05:47Z
+
+- Milestone: `M12.4` production hardening
+- Item: `M12.4.a` ticket determinism polish + material hash (resume)
+- Commands executed:
+  - `cat docs/PM_STATE.md`
+  - `tail -n 40 docs/PM_LOG.md`
+- Decision:
+  - Start `M12.4.a` and add a deterministic `material_hash` for ticket payloads (ignoring volatile timestamps).
+
+## 2026-01-10T21:06:20Z
+
+- Milestone: `M12.4` production hardening
+- Item: `M12.4.a1` baseline state (cleanliness + latest tickets)
+- Commands executed:
+  - `git status --porcelain=v1`
+  - `make tickets-last`
+
+## 2026-01-10T21:07:20Z
+
+- Milestone: `M12.4` production hardening
+- Item: `M12.4.a2` determinism smoke test (two DRYRUN trade runs)
+- Commands executed:
+  - Submit deterministic `SKIPPED` fills confirmation for latest TRADE ticket (unblocks next dry-run).
+  - `DRYRUN_TRADES=true make run-1400` (twice; with confirmation between)
+  - `make tickets-last`
+- Outputs:
+  - New TRADE tickets: `1c222adb-e15f-54e9-bdfb-b4603acb3f42`, `0c730104-4bb3-5e63-9b8a-6d1b7a95f495`
+
+## 2026-01-10T21:07:30Z
+
+- Milestone: `M12.4` production hardening
+- Item: `M12.4.a3` ticket diff check (format/order)
+- Finding:
+  - Differences between back-to-back TRADE tickets were limited to run/ticket identifiers and run-specific pointers/timestamps (no ordering/format drift detected).
+
+## 2026-01-10T21:08:30Z
+
+- Milestone: `M12.4` production hardening
+- Item: `M12.4.a4` implement material hash
+- What changed:
+  - `scripts/ticket_render.py` now:
+    - Computes a deterministic `meta.material_hash` (sha256) over the rendered JSON payload excluding `created_utc`.
+    - Writes `/data/trading-ops/artifacts/tickets/<ticket_id>/material_hash.txt`.
+    - Ensures `ticket.md` and `ticket.json` are written from the same final payload (including confirmed_fills + meta).
+
+## 2026-01-10T21:09:50Z
+
+- Milestone: `M12.4` production hardening
+- Item: `M12.4.a5` verify material hash artifacts
+- Commands executed:
+  - `DRYRUN_TRADES=true make run-1400` (twice)
+  - `cat /data/trading-ops/artifacts/tickets/<ticket_id>/material_hash.txt`
+- Outputs:
+  - TRADE tickets: `76736173-a9b1-5a84-90d8-a88994be1a69`, `9f53d9c2-40d2-5316-9bb3-5b6efc3b4105`
+  - material_hashes:
+    - `d6e33d5c14ffe603aa65eea1f5cddba9a2801c4c00ffe8811c5d52fd61f30c3d`
+    - `5e923360f6594ead93dd502dc5f49954840cca90e3d350f3c537ecbc5c6bf460`
+- Diff summary:
+  - No ordering/format drift detected; differences were limited to run/ticket identifiers and run-specific pointers/fields (including reconciliation report_path/evaluated_at and material_hash).

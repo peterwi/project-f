@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -372,6 +373,8 @@ def _render_ticket_md(payload: dict) -> str:
     lines.append(f"- run_id: `{payload['run_id']}`")
     lines.append(f"- asof_date: `{payload.get('asof_date','')}`")
     lines.append(f"- created_utc: `{payload['created_utc']}`")
+    if payload.get("meta", {}).get("material_hash"):
+        lines.append(f"- material_hash: `{payload['meta']['material_hash']}`")
     lines.append(f"- decision: `{payload['decision_type']}`")
     lines.append(f"- execution_window_uk: `{payload['execution_window_uk']}`")
     lines.append("")
@@ -588,9 +591,11 @@ def main() -> int:
         "ticket_md": str(ticket_dir / "ticket.md"),
         "ticket_json": str(ticket_dir / "ticket.json"),
     }
+    material_hash_path = ticket_dir / "material_hash.txt"
     artifact_paths = {
         "run_dir": str(inputs.run_dir),
         "ticket_dir": str(ticket_dir),
+        "material_hash_txt": str(material_hash_path),
         **outputs,
     }
     payload = {
@@ -605,7 +610,7 @@ def main() -> int:
         "gate_statuses": gate_statuses,
         "blocking_reasons": blocking_reasons,
         "intended_trades": intended_trades,
-        "confirmed_fills": [],
+        "confirmed_fills": _load_confirmed_fills(ticket_id),
         "git_commit": run_meta.get("git_commit", ""),
         "config_hash": run_meta.get("config_hash", ""),
         "artifact_paths": artifact_paths,
@@ -618,11 +623,21 @@ def main() -> int:
         "outputs": outputs,
     }
 
+    # Deterministic material hash over ticket payload excluding volatile timestamps.
+    material_payload = json.loads(json.dumps(payload, sort_keys=True))
+    material_payload.pop("created_utc", None)
+    material_payload.pop("meta", None)
+    material_hash = hashlib.sha256(
+        json.dumps(material_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    payload.setdefault("meta", {})["material_hash"] = material_hash
+
     md = _render_ticket_md(payload)
     ticket_md_path = Path(outputs["ticket_md"])
     ticket_json_path = Path(outputs["ticket_json"])
     ticket_md_path.write_text(md, encoding="utf-8")
     ticket_json_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    material_hash_path.write_text(material_hash + "\n", encoding="utf-8")
 
     md_tag, md_dq = _dollar_quote("md", md)
     json_str = json.dumps(payload, sort_keys=True)
@@ -655,10 +670,6 @@ def main() -> int:
           and (ticket_id is null or ticket_id <> '{ticket_id}'::uuid);
         """
     )
-
-    payload["confirmed_fills"] = _load_confirmed_fills(ticket_id)
-    ticket_json_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    ticket_md_path.write_text(_render_ticket_md(payload), encoding="utf-8")
 
     print(f"ticket_id={ticket_id}")
     print(f"run_id={run_id}")
