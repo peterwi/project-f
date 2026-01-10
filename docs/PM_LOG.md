@@ -1109,6 +1109,16 @@ This file is append-only. Each agent message appends a new entry so the project 
 - Decision:
   - Mark `M12.2` complete, advance pointer to `M12.3` (scheduler validation + retention) and commit changes.
 
+## 2026-01-10T20:20:30Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.k` commit recorded
+- Commands executed:
+  - `git add Makefile docs/CHECKLIST.md docs/PM_LOG.md docs/PM_STATE.md docs/RECONCILIATION_SOP.md docs/RUNBOOK.md scripts/confirmation_gate.py scripts/riskguard_run.py scripts/run_scheduled.py scripts/ticket_render.py`
+  - `git commit -m "M12.2: ticket polish + deterministic stability"`
+- Output:
+  - Commit: `6b93532`
+
 ## 2026-01-10T20:03:26Z
 
 - Milestone: `M12.2` ticket polish/stability
