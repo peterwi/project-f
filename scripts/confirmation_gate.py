@@ -127,16 +127,17 @@ def main() -> int:
                coalesce(status,'')
         from tickets
         where run_id <> '{run_id}'
+          and ticket_type = 'TRADE'
         order by created_at desc
         limit 1;
         """
     )
     if not latest_ticket:
-        print("CONFIRMATION_GATE_PASS (no previous ticket)")
+        print("CONFIRMATION_GATE_PASS (no previous TRADE ticket)")
         _psql_exec(
             f"""
             insert into risk_checks(run_id, check_name, passed, details)
-            values ('{run_id}'::uuid, 'confirmation_deadline', true, '{{\"status\":\"no_previous_ticket\",\"evaluated_at_utc\":\"{now_utc}\"}}'::jsonb)
+            values ('{run_id}'::uuid, 'confirmation_deadline', true, '{{\"status\":\"no_previous_trade_ticket\",\"evaluated_at_utc\":\"{now_utc}\"}}'::jsonb)
             on conflict (run_id, check_name) do update set passed = excluded.passed, details = excluded.details;
             """
         )
@@ -170,7 +171,7 @@ def main() -> int:
         "confirmations_count": conf_count,
         "latest_confirmation_type": last_conf_type,
         "latest_confirmation_fills_count": int(last_conf_fills or "0"),
-        "rule": "previous ticket must have >=1 confirmation by start of 14:00 run",
+        "rule": "previous TRADE ticket must have >=1 confirmation by start of 14:00 run",
     }
 
     _psql_exec(

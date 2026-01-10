@@ -316,6 +316,19 @@ def main() -> int:
 
             # Gate decision (NO_TRADE is expected in v1); treat rc=2 as valid execution outcome.
             steps.append(_run_cmd("riskguard", ["python3", "scripts/riskguard_run.py", "--run-id", run_id], accept_rcs=(0, 2)))
+
+            # Refresh run_summary before ticket rendering so the ticket sees deterministic step outcomes
+            # (otherwise it may parse only the initial bootstrap summary).
+            _write_summary(
+                summary_path,
+                run_id=run_id,
+                cadence=args.cadence,
+                run_label=run_label,
+                status="running",
+                config_hash=config_hash,
+                git_commit=git_commit,
+                steps=steps,
+            )
             steps.append(_run_cmd("ticket", ["python3", "scripts/ticket_render.py", "--run-id", run_id], accept_rcs=(0,)))
 
         steps.append(_run_cmd("report-daily", ["python3", "scripts/report_daily.py", "--run-id", run_id, "--cadence", args.cadence], accept_rcs=(0,)))

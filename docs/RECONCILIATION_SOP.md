@@ -43,6 +43,23 @@ Notes:
 
 ### 3.2 Add the snapshot
 
+Daily (recommended): add snapshot + run the gate in one command:
+
+```bash
+make reconcile-daily -- \
+  --snapshot-date YYYY-MM-DD \
+  --cash-gbp <available_cash_gbp> \
+  --position SYMBOL=UNITS \
+  --position SYMBOL=UNITS \
+  --notes "manual_etoro_snapshot"
+```
+
+Expected:
+- prints `RECONCILIATION_PASS`
+- writes a report under `/data/trading-ops/artifacts/reports/reconcile_<snapshot_date>_*.md`
+
+Manual (two-step) mode:
+
 ```bash
 make reconcile-add -- \
   --snapshot-date YYYY-MM-DD \
@@ -68,4 +85,3 @@ Expected:
 - Unknown symbols: add them to `config/universe.csv` and run `make universe-import`, then re-run `make reconcile-run`.
 - Cash drift: confirm you used **Available cash**, not total value; then record missing deposits/withdrawals via cash movements.
 - Units drift: confirm the snapshot includes **all** holdings and units copied exactly (including fractional shares).
-

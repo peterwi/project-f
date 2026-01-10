@@ -27,6 +27,7 @@ help:
 	@echo "  make data-quality     # run data quality gate"
 	@echo "  make ledger-report    # write ledger report"
 	@echo "  make reconcile-add    # add reconciliation snapshot"
+	@echo "  make reconcile-daily  # add snapshot + run reconcile gate"
 	@echo "  make reconcile-run    # run reconciliation gate"
 	@echo "  make reconcile-selftest # proves PASS/FAIL"
 	@echo "  make run-ops          # one-command ops gates run"
@@ -222,6 +223,11 @@ reconcile-add:
 reconcile-run:
 	@python3 scripts/reconcile_run.py $(filter-out $@,$(MAKECMDGOALS))
 
+.PHONY: reconcile-daily
+reconcile-daily:
+	@$(MAKE) reconcile-add -- $(filter-out $@,$(MAKECMDGOALS))
+	@$(MAKE) reconcile-run
+
 .PHONY: reconcile-selftest
 reconcile-selftest:
 	@chmod +x scripts/reconcile_selftest.py scripts/reconcile_run.py
@@ -320,7 +326,7 @@ tickets-last:
 # Allow passing CLI args via extra MAKECMDGOALS, e.g.:
 #   make reconcile-add -- --snapshot-date 2025-12-22 --cash-gbp 25.88 --position AAPL=0.1
 # Only enabled when one of these targets is present to avoid masking typos.
-PASSTHRU_TARGETS := reconcile-add reconcile-run stub-signals riskguard confirm-fills
+PASSTHRU_TARGETS := reconcile-add reconcile-daily reconcile-run stub-signals riskguard confirm-fills
 ifneq (,$(filter $(PASSTHRU_TARGETS),$(MAKECMDGOALS)))
 %:
 	@:

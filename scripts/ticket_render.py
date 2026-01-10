@@ -216,7 +216,75 @@ def _universe_counts() -> dict[str, int]:
         )
         or "0"
     )
-    return {"enabled_count": enabled, "benchmark_count": benchmarks, "total_count": enabled + benchmarks}
+    total = int(
+        _psql_capture(
+            """
+            select count(*)
+            from config_universe
+            where enabled = true
+               or lower(coalesce(instrument_type,'')) in ('benchmark','index');
+            """
+        )
+        or "0"
+    )
+    return {"enabled_count": enabled, "benchmark_count": benchmarks, "total_count": total}
+
+
+def _universe_symbols() -> dict[str, list[str]]:
+    enabled_raw = _psql_capture(
+        """
+        select internal_symbol
+        from config_universe
+        where enabled = true
+        order by internal_symbol;
+        """
+    )
+    benchmark_raw = _psql_capture(
+        """
+        select internal_symbol
+        from config_universe
+        where lower(coalesce(instrument_type,'')) in ('benchmark','index')
+        order by internal_symbol;
+        """
+    )
+    enabled = [s.strip() for s in (enabled_raw.splitlines() if enabled_raw else []) if s.strip()]
+    benchmarks = [s.strip() for s in (benchmark_raw.splitlines() if benchmark_raw else []) if s.strip()]
+    return {"enabled_symbols": enabled, "benchmark_symbols": benchmarks}
+
+
+def _load_risk_checks_for_run(run_id: str) -> list[dict]:
+    raw = _psql_capture(
+        f"""
+        select
+          check_name || '|' ||
+          passed::text || '|' ||
+          coalesce(details::text,'{{}}')
+        from risk_checks
+        where run_id = '{run_id}'::uuid
+        order by check_name;
+        """
+    )
+    checks: list[dict] = []
+    for line in (raw.splitlines() if raw else []):
+        name, passed_s, detail_s = line.split("|", 2)
+        passed = passed_s.strip().lower() in ("t", "true", "1", "yes")
+        try:
+            detail = json.loads(detail_s) if detail_s else {}
+        except Exception:
+            detail = {"raw": (detail_s or "")}
+        checks.append({"name": name.strip(), "passed": passed, "detail": detail})
+
+    order = {
+        "data_quality": 10,
+        "reconciliation": 20,
+        "confirmations": 30,
+        "universe_verified": 40,
+        "ledger_ready": 50,
+        "trade_builder": 60,
+    }
+    checks = [c for c in checks if str(c.get("name") or "") in order]
+    checks.sort(key=lambda c: (order.get(str(c.get("name") or ""), 999), str(c.get("name") or "")))
+    return checks
 
 def _load_confirmed_fills(ticket_id: str) -> list[dict]:
     raw = _psql_capture(
@@ -290,28 +358,34 @@ def _parse_run_summary_steps(path: Path) -> dict[str, str]:
 
 
 def _render_ticket_md(payload: dict) -> str:
-    reasons_json = json.dumps(payload.get("blocking_reasons", []), indent=2)
-    gate_statuses_json = json.dumps(payload.get("gate_statuses", {}), indent=2)
+    reasons_json = json.dumps(payload.get("blocking_reasons", []), indent=2, sort_keys=True)
+    gate_statuses_json = json.dumps(payload.get("gate_statuses", {}), indent=2, sort_keys=True)
     intended_trades = payload.get("intended_trades") or []
     confirmed_fills = payload.get("confirmed_fills") or []
 
     lines: list[str] = []
     lines.append("# Trade Ticket")
     lines.append("")
-    lines.append(f"## DECISION: {payload['decision_type'].replace('_', '-')}")
+    lines.append(f"## DECISION: {payload['decision_type']}")
     lines.append("")
     lines.append(f"- ticket_id: `{payload['ticket_id']}`")
     lines.append(f"- run_id: `{payload['run_id']}`")
     lines.append(f"- asof_date: `{payload.get('asof_date','')}`")
     lines.append(f"- created_utc: `{payload['created_utc']}`")
     lines.append(f"- decision: `{payload['decision_type']}`")
-    lines.append(f"- execution_window_uk: `{payload['execution_window_uk']}` (DST-aware: TBD)")
+    lines.append(f"- execution_window_uk: `{payload['execution_window_uk']}`")
     lines.append("")
     lines.append("## Universe")
     lines.append("")
     lines.append(f"- total_count: `{payload['universe']['total_count']}`")
     lines.append(f"- enabled_count: `{payload['universe']['enabled_count']}`")
     lines.append(f"- benchmark_count: `{payload['universe']['benchmark_count']}`")
+    enabled_syms = payload["universe"].get("enabled_symbols") or []
+    bench_syms = payload["universe"].get("benchmark_symbols") or []
+    if enabled_syms is not None:
+        lines.append(f"- enabled_symbols: `{', '.join(enabled_syms)}`")
+    if bench_syms is not None:
+        lines.append(f"- benchmark_symbols: `{', '.join(bench_syms)}`")
     lines.append("")
     lines.append("## Gate statuses")
     lines.append("")
@@ -347,7 +421,12 @@ def _render_ticket_md(payload: dict) -> str:
             notional = t.get("notional_value_base", None)
             ref_px = t.get("reference_price", None)
             slippage = t.get("max_slippage_bps", None)
-            units_s = (f"{units:g}" if isinstance(units, (int, float)) else str(units)) if units is not None else "N/A"
+            if units is None:
+                units_s = "N/A"
+            elif isinstance(units, (int, float)):
+                units_s = f"{float(units):.6f}".rstrip("0").rstrip(".")
+            else:
+                units_s = str(units)
             notional_s = (f"{float(notional):.2f}" if isinstance(notional, (int, float)) else str(notional)) if notional is not None else ""
             ref_s = (f"{float(ref_px):.4f}" if isinstance(ref_px, (int, float)) else str(ref_px)) if ref_px is not None else ""
             slip_s = (str(slippage) if slippage is not None else "")
@@ -364,7 +443,7 @@ def _render_ticket_md(payload: dict) -> str:
         lines.append("")
 
     if payload["decision_type"] == "NO_TRADE":
-        lines.append("## NO-TRADE (blocked)")
+        lines.append("## NO_TRADE (blocked)")
         lines.append("")
         lines.append("Blocking reasons (verbatim from `no_trade.json`):")
         lines.append("")
@@ -429,11 +508,13 @@ def _render_ticket_md(payload: dict) -> str:
             lines.append(f"- {' '.join(parts)}")
         lines.append("")
 
-    lines.append("## TRADE")
+    lines.append("## Confirmations")
     lines.append("")
-    if not intended_trades:
-        lines.append("No intended trades found for this run.")
-        lines.append("")
+    lines.append("Submit fills for TRADE tickets after manual execution (or SKIPPED for dry-run).")
+    lines.append("")
+    lines.append(f"- ticket_id: `{payload['ticket_id']}`")
+    lines.append(f"- confirmations_dir: `{payload.get('artifact_paths', {}).get('ticket_dir','')}/confirmations/`")
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -457,7 +538,7 @@ def main() -> int:
     execution_window_uk = "UK time 14:30–16:00"
 
     run_meta = _run_metadata(run_id)
-    universe = _universe_counts()
+    universe = {**_universe_counts(), **_universe_symbols()}
     ops_steps = _parse_run_summary_steps(inputs.run_summary_md)
 
     decision_type = "NO_TRADE" if inputs.no_trade_json else "TRADE"
@@ -466,9 +547,13 @@ def main() -> int:
     gate_statuses: dict = {"ops_steps": ops_steps}
     blocking_reasons: list[dict] = []
     no_trade_asof: str = ""
+    risk_checks = _load_risk_checks_for_run(run_id)
+    if risk_checks:
+        gate_statuses["risk_checks"] = risk_checks
     if inputs.no_trade_json:
         no_trade = _read_json(inputs.no_trade_json)
-        gate_statuses["risk_checks"] = no_trade.get("risk_checks", [])
+        if not risk_checks:
+            gate_statuses["risk_checks"] = no_trade.get("risk_checks", [])
         blocking_reasons = no_trade.get("reasons", [])
         no_trade_asof = str(no_trade.get("asof_date", "") or "")
 
@@ -485,11 +570,14 @@ def main() -> int:
         trades_intended_asof = str(trades_intended.get("asof_date_used", "") or "")
         base_currency = str(trades_intended.get("base_currency", "") or base_currency)
         intended_trades = list(trades_intended.get("intended_trades", []) or [])
-        gate_statuses["trade_builder"] = {
-            "trade_builder_ok": bool((trades_intended.get("result") or {}).get("trade_builder_ok", False)),
-            "reason": str((trades_intended.get("result") or {}).get("reason", "")),
-            "intended_count": len(intended_trades),
-        }
+        side_order = {"BUY": 0, "SELL": 1}
+        intended_trades.sort(
+            key=lambda t: (
+                str(t.get("internal_symbol") or ""),
+                side_order.get(str(t.get("side") or "").upper(), 9),
+                int(t.get("sequence") or 0),
+            )
+        )
 
     asof_date = run_meta.get("asof_date") or no_trade_asof or trades_intended_asof or trades_proposed_asof
 
@@ -523,9 +611,9 @@ def main() -> int:
         "artifact_paths": artifact_paths,
         "inputs": {
             "run_summary_md": str(inputs.run_summary_md),
-            "no_trade_json": (str(inputs.no_trade_json) if inputs.no_trade_json else ""),
-            "trades_proposed_json": (str(inputs.trades_proposed_json) if inputs.trades_proposed_json else ""),
-            "trades_intended_json": (str(inputs.trades_intended_json) if inputs.trades_intended_json else ""),
+            "no_trade_json": (str(inputs.no_trade_json) if inputs.no_trade_json else "-"),
+            "trades_proposed_json": (str(inputs.trades_proposed_json) if inputs.trades_proposed_json else "-"),
+            "trades_intended_json": (str(inputs.trades_intended_json) if inputs.trades_intended_json else "-"),
         },
         "outputs": outputs,
     }

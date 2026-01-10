@@ -800,3 +800,326 @@ This file is append-only. Each agent message appends a new entry so the project 
 - Reference artifacts:
   - TRADE run: `/data/trading-ops/artifacts/runs/dc6afe0d-e60f-4cca-8883-4c82710128c7/run_summary.md`
   - TRADE ticket: `/data/trading-ops/artifacts/tickets/039b908f-7b0c-5aa9-a2fb-fea29c0a44d6/ticket.md`
+
+## 2026-01-10T19:52:49Z
+
+- Milestone: `M11` → post-M11 daily ops hardening
+- Item: `PRECHECK.1` baseline + resume pointer
+- Commands executed:
+  - `git status --porcelain=v1`
+  - `git log -3 --oneline`
+  - `cat docs/PM_STATE.md`
+  - `tail -n 60 docs/PM_LOG.md`
+- Findings:
+  - Repo has untracked file `resume-02012026.txt` (left untouched).
+  - `docs/PM_STATE.md` was at `CURRENT_CHECKLIST_ITEM=END` with last known good run/ticket ids unchanged.
+- Decision:
+  - Proceed with service/mount sanity checks before proposing M12 checklist items.
+
+## 2026-01-10T19:54:15Z
+
+- Milestone: `M11` → post-M11 daily ops hardening
+- Item: `PRECHECK.2` sanity of services + mounts + core dirs
+- Commands executed:
+  - `findmnt -no SOURCE,FSTYPE,OPTIONS /data || true`
+  - `df -hT /data`
+  - `docker ps`
+  - `ls -la /data/trading-ops | sed -n '1,120p'`
+- Findings:
+  - `/data` mounted on `/dev/sdc1` (xfs), ample free space (~1.8T).
+  - Containers running: `trading-ops-postgres` (healthy) and `trading-ops-scheduler`.
+  - Core `/data/trading-ops` directories present (`artifacts/`, `postgres-data/`, etc).
+- Decision:
+  - Proceed to safe-by-default functional checks (`make run-1400` must remain `NO_TRADE`).
+
+## 2026-01-10T19:54:15Z
+
+- Milestone: `M11` → post-M11 daily ops hardening
+- Item: `PRECHECK.3` quick functional checks (safe-by-default)
+- Commands executed:
+  - `make migrate`
+  - `make runs-last`
+  - `make tickets-last`
+  - `make run-1400`
+  - `make tickets-last`
+- Findings:
+  - Migrations: already up to date.
+  - Default run produced `NO_TRADE` ticket `f09aa089-f578-5963-9bb5-7dcbc497578f` for run `e393912f-1bd9-445b-9766-d56fab4ab3bf` (asof_date `2026-01-02`).
+- Decision:
+  - Proceed to DRYRUN trade path verification (must yield `TRADE` only when gates pass).
+
+## 2026-01-10T19:54:43Z
+
+- Milestone: `M11` → post-M11 daily ops hardening
+- Item: `PRECHECK.4` DRYRUN trade path verification
+- Commands executed:
+  - `DRYRUN_TRADES=true make run-1400`
+  - `make tickets-last`
+- Findings:
+  - DRYRUN run produced `TRADE` ticket `5e2e7d48-75c3-52ca-90ad-2587484a0097` for run `927ea77d-c272-474a-9059-2f5e5f7bd16f` (asof_date `2026-01-02`).
+- Decision:
+  - System state matches M11 invariants; start proposing `M12` minimal “production-like daily ops” hardening.
+
+## 2026-01-10T19:55:55Z
+
+- Milestone: `M12` planning
+- Item: `M12.PLANNING.1` review checklist + existing reconcile targets
+- Commands executed:
+  - `ls -la docs | sed -n '1,200p'`
+  - `sed -n '1,240p' docs/CHECKLIST.md`
+  - `rg -n "reconcile" Makefile | sed -n '1,200p'`
+- Findings:
+  - `docs/CHECKLIST.md` is the single source of truth and already encodes the reconciliation invariants.
+  - Make targets already exist: `reconcile-add`, `reconcile-run`, `reconcile-selftest`.
+- Decision:
+  - Implement `M12.1` as a minimal “one-command” wrapper (`make reconcile-daily`) + SOP/runbook updates.
+
+## 2026-01-10T19:56:21Z
+
+- Milestone: `M12` planning
+- Item: `M12.PLANNING.2` confirm scheduler + run targets exist
+- Commands executed:
+  - `tail -n 80 docs/CHECKLIST.md`
+  - `sed -n '180,360p' Makefile`
+- Findings:
+  - `make run-0800` and `make run-1400` targets exist.
+  - `make confirm` (`--ack-no-trade`) and `make confirm-fills` (`--fills-json`) targets exist.
+- Decision:
+  - Keep `M12` scope minimal and deterministic; start with reconciliation helper + documented daily operator steps.
+
+## 2026-01-10T19:57:19Z
+
+- Milestone: `M12.1` reconciliation one-liner
+- Item: `M12.1.a` inspect Makefile wiring points
+- Commands executed:
+  - `sed -n '1,80p' Makefile`
+  - `sed -n '200,260p' Makefile`
+  - `rg -n "PASSTHRU_TARGETS" -n Makefile`
+- Decision:
+  - Add `make reconcile-daily` target and include it in `PASSTHRU_TARGETS`.
+
+## 2026-01-10T19:57:46Z
+
+- Milestone: `M12.1` reconciliation one-liner
+- Item: `M12.1.b` review existing operator docs for update points
+- Commands executed:
+  - `sed -n '1,240p' docs/RECONCILIATION_SOP.md`
+  - `sed -n '1,260p' docs/RUNBOOK.md`
+- Decision:
+  - Update SOP to include `make reconcile-daily`; update runbook with explicit daily 08:00 → reconcile → 14:00 → confirm flow.
+
+## 2026-01-10T19:57:53Z
+
+- Milestone: `M12.1` reconciliation one-liner
+- Item: `M12.1.c` confirm CLI flags for docs/examples
+- Commands executed:
+  - `python3 scripts/reconcile_snapshot_add.py --help`
+  - `python3 scripts/reconcile_run.py --help`
+- Findings:
+  - Snapshot supports `--notes`; gate supports optional `--snapshot-id`.
+
+## 2026-01-10T19:58:50Z
+
+- Milestone: `M12.1` reconciliation one-liner
+- Item: `M12.1.d` dry-run validation attempt (make args passthru)
+- Commands executed:
+  - `make help | rg -n "reconcile-daily" || true`
+  - `make -n reconcile-daily -- --snapshot-date 2026-01-02 --cash-gbp 0 --position AAPL=0.01 --notes TEST`
+- Finding:
+  - Wrapper initially forwarded `--snapshot-date ...` to recursive `make` without inserting `--`, causing make to parse args as options.
+- Decision:
+  - Fix wrapper to call `$(MAKE) reconcile-add -- <args>` so passthru args starting with `--` are always treated as script args.
+
+## 2026-01-10T19:59:28Z
+
+- Milestone: `M12.1` reconciliation one-liner
+- Item: `M12.1.e` validation (non-mutating)
+- Commands executed:
+  - `make reconcile-daily -- --help`
+  - `make reconcile-run`
+- Verification:
+  - `make reconcile-daily -- --help` shows snapshot CLI help and runs the reconciliation gate.
+  - Gate prints `RECONCILIATION_PASS` and writes reports:
+    - `/data/trading-ops/artifacts/reports/reconcile_2026-01-02_20260110T195930Z.md`
+    - `/data/trading-ops/artifacts/reports/reconcile_2026-01-02_20260110T195931Z.md`
+- What changed (repo):
+  - `Makefile`: added `reconcile-daily` target + passthru support.
+  - `docs/RECONCILIATION_SOP.md`: documented one-liner.
+  - `docs/RUNBOOK.md`: documented daily 08:00/14:00 + confirmations.
+  - `docs/CHECKLIST.md`: added M12 milestone and marked M12.1 done.
+
+## 2026-01-10T20:00:30Z
+
+- Milestone: `M12` daily ops hardening
+- Item: `M12.PRECHECK.0800` scheduled 08:00 run sanity
+- Commands executed:
+  - `make run-0800`
+  - `make runs-last`
+- Findings:
+  - 08:00 run `38f5b027-a2a9-4e4c-a0be-f127649d2d27` completed `passed`.
+- Decision:
+  - Treat 08:00/14:00 scheduling as healthy; proceed with `M12.2` ticket stability polish next.
+
+## 2026-01-10T20:01:28Z
+
+- Milestone: `M12` daily ops hardening
+- Item: `M12.AUDIT.1` working tree audit
+- Commands executed:
+  - `git status --porcelain=v1`
+- Findings:
+  - Modified: `Makefile`, `docs/CHECKLIST.md`, `docs/RECONCILIATION_SOP.md`, `docs/RUNBOOK.md`, `docs/PM_LOG.md`, `docs/PM_STATE.md`
+  - Untracked: `resume-02012026.txt` (left untouched)
+
+## 2026-01-10T20:03:16Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.a` resume pointer + last log entry
+- Commands executed:
+  - `cat docs/PM_STATE.md`
+  - `tail -n 40 docs/PM_LOG.md`
+- Decision:
+  - Proceed to generate fresh baseline NO_TRADE + DRYRUN TRADE tickets for content review.
+
+## 2026-01-10T20:03:26Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.a` generate baseline tickets (pre-fix)
+- Commands executed:
+  - `make run-1400`
+  - `make tickets-last`
+  - `DRYRUN_TRADES=true make run-1400`
+  - `make tickets-last`
+- Outputs:
+  - NO_TRADE: `a4e46769-fdd1-5aba-af80-60821a8e368a` (run `bc05b1c2-4b8f-433f-bcc3-9df53f3b47a1`, asof `2026-01-09`)
+  - TRADE: `a4df07ac-02d7-5647-b0e0-15ee2b86dcf6` (run `690ca4c4-afad-45ba-b7d0-b747519e41c7`, asof `2026-01-09`)
+
+## 2026-01-10T20:04:10Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.b` inspect tickets (parsing fix + initial findings)
+- Commands executed:
+  - `make tickets-last > /tmp/tickets_last.txt`
+  - `cat /tmp/tickets_last.txt`
+  - Extract ticket ids from psql-style table via `awk -F'|' ...`
+  - `sed -n '1,220p' /data/trading-ops/artifacts/tickets/<id>/ticket.md`
+- Findings (issues):
+  - Ticket header formatting: `NO-TRADE` used hyphenated label; needed consistent `NO_TRADE`.
+  - `execution_window_uk` included `(DST-aware: TBD)` (non-deterministic / operator-hostile).
+  - TRADE ticket gate status JSON was incomplete (missing core gates like reconciliation/confirmations).
+  - Some pointer fields rendered as empty strings (needed deterministic `-` or omitted).
+- Root-cause identified:
+  - `scripts/riskguard_run.py` confirmations check looked at *latest ticket* (any type), allowing a newer NO_TRADE ticket to mask an earlier missing-TRADE-fills condition.
+
+## 2026-01-10T20:10:50Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.c` implement deterministic ticket + gating fixes
+- What changed:
+  - `scripts/riskguard_run.py`
+    - Confirmations check now targets the latest `TRADE` ticket (not latest ticket overall).
+    - Stop deleting all `risk_checks` rows for the run (avoid clobbering other checks; relies on upsert).
+  - `scripts/ticket_render.py`
+    - Remove `(DST-aware: TBD)` suffix; keep deterministic window string.
+    - Render `NO_TRADE` consistently (no hyphenated headings).
+    - Universe section lists sorted enabled/benchmark symbols.
+    - Gate statuses always include riskguard `risk_checks` (DB-backed, stable ordering), for both TRADE and NO_TRADE.
+    - Use deterministic `-` placeholders for absent pointer paths.
+    - Sort intended trades deterministically; stable numeric formatting.
+    - Replace trailing `## TRADE` stub with a minimal confirmations section.
+
+## 2026-01-10T20:11:05Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.d` rerun baseline tickets (post-fix; gating tightened)
+- Commands executed:
+  - `make run-1400`
+  - `make tickets-last`
+  - `DRYRUN_TRADES=true make run-1400`
+  - `make tickets-last`
+- Finding:
+  - With confirmations gating fixed, DRYRUN trade was correctly blocked due to missing fills on latest TRADE ticket.
+- Decision:
+  - Submit deterministic `SKIPPED` fills confirmations for dry-run TRADE tickets to unblock continued verification.
+
+## 2026-01-10T20:12:12Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.e` confirmations unblock (dry-run hygiene)
+- Commands executed:
+  - Create `/data/trading-ops/artifacts/manual_fills/a4df07ac-02d7-5647-b0e0-15ee2b86dcf6/fills_skipped.json`
+  - `python3 scripts/confirmations_submit.py --ticket-id a4df07ac-02d7-5647-b0e0-15ee2b86dcf6 --fills-json ... --notes DRYRUN_SKIPPED`
+- Output:
+  - confirmation_uuid: `c476cbfd-b430-45dc-a9c0-4e357e5f0f4d`
+
+## 2026-01-10T20:12:18Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.f` re-validate TRADE ticket rendering
+- Commands executed:
+  - `DRYRUN_TRADES=true make run-1400`
+  - `make tickets-last`
+- Output:
+  - TRADE ticket: `8aad1e62-a7f8-5dc9-8f7e-f1167c2f459d` (run `02915982-0fb1-4a48-91ea-25dc383183e8`, asof `2026-01-09`)
+
+## 2026-01-10T20:14:00Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.g` determinism fix for ops_steps (run_summary timing)
+- Finding:
+  - Ticket `ops_steps` was initially incomplete (often only `migrate`) because `scripts/run_scheduled.py` writes an initial minimal `run_summary.md` early and only writes the final summary at the end.
+- Fix:
+  - `scripts/run_scheduled.py` now refreshes `run_summary.md` immediately after `riskguard` and before `ticket`, so the ticket parses deterministic step outcomes.
+- Additional polish:
+  - `scripts/confirmation_gate.py` now checks only the previous `TRADE` ticket (matches “do not block on NO_TRADE tickets” design).
+
+## 2026-01-10T20:17:25Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.h` final verification run (NO_TRADE default + DRYRUN TRADE)
+- Commands executed:
+  - `make run-1400` (must remain safe NO_TRADE)
+  - `DRYRUN_TRADES=true make run-1400` (TRADE only when gates pass)
+- Outputs:
+  - NO_TRADE: `55f8ebec-f2f7-5af8-a645-94de1688b330` (run `029ad993-0193-4ec1-bebf-89cca4d1d307`)
+  - TRADE: `fb0034f9-af2e-5760-9607-b25830fabd5d` (run `51077cbe-6906-4465-93f2-a6a50c475a25`)
+- Ticket polish checklist status:
+  - Header correctness: PASS
+  - Execution window string: PASS (no TBD)
+  - Universe listing: PASS (sorted, explicit)
+  - Gate statuses: PASS (stable ordering; includes required gates)
+  - Intended trades ordering/rounding: PASS
+  - Pointers/links: PASS (no empty strings)
+  - Determinism hazards: PASS (no unexpected randomness; timestamps only where expected)
+  - Schema-safe reads: PASS (ticket uses schema-safe queries)
+
+## 2026-01-10T20:18:34Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.i` confirmations hygiene (keep DRYRUN loop unblocked)
+- Commands executed:
+  - Create `/data/trading-ops/artifacts/manual_fills/fb0034f9-af2e-5760-9607-b25830fabd5d/fills_skipped.json`
+  - `python3 scripts/confirmations_submit.py --ticket-id fb0034f9-af2e-5760-9607-b25830fabd5d --fills-json ... --notes DRYRUN_SKIPPED`
+- Output:
+  - confirmation_uuid: `928b6e32-9bca-425f-aba8-838385d1f1c6`
+
+## 2026-01-10T20:19:59Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.j` repo updates + commit
+- Decision:
+  - Mark `M12.2` complete, advance pointer to `M12.3` (scheduler validation + retention) and commit changes.
+
+## 2026-01-10T20:03:26Z
+
+- Milestone: `M12.2` ticket polish/stability
+- Item: `M12.2.a` generate fresh NO_TRADE + TRADE tickets
+- Commands executed:
+  - `make run-1400`
+  - `make tickets-last`
+  - `DRYRUN_TRADES=true make run-1400`
+  - `make tickets-last`
+- Outputs:
+  - NO_TRADE ticket: `a4e46769-fdd1-5aba-af80-60821a8e368a` (run `bc05b1c2-4b8f-433f-bcc3-9df53f3b47a1`, asof `2026-01-09`)
+  - TRADE ticket: `a4df07ac-02d7-5647-b0e0-15ee2b86dcf6` (run `690ca4c4-afad-45ba-b7d0-b747519e41c7`, asof `2026-01-09`)
+- Decision:
+  - Proceed to inspect both `ticket.md` files and evaluate determinism/polish criteria.

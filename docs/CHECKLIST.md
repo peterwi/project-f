@@ -426,3 +426,46 @@ Non-negotiables (must remain true always):
   - `mcp-repo` (safe file ops abstraction)
   - `mcp-ci` (run make targets + capture artifacts)
   - `mcp-db-readonly` (read-only queries for reporting; no writes)
+
+---
+
+## M12 — Production daily ops hardening (deterministic, file-first)
+
+- [x] **M12.1 One-command daily reconciliation helper + operator steps**
+  - Objective: Make reconciliation fast and repeatable; make it hard to accidentally skip.
+  - Commands:
+    - `make reconcile-daily -- --snapshot-date YYYY-MM-DD --cash-gbp <cash> --position SYMBOL=UNITS --notes "manual_etoro_snapshot"`
+    - `make reconcile-selftest` (optional proof of PASS/FAIL behavior)
+  - Verification:
+    - Command prints `RECONCILIATION_PASS` and writes a report under `/data/trading-ops/artifacts/reports/`.
+    - Runbook/SOP clearly define daily operator flow (08:00 → reconcile → 14:00 → confirm).
+  - Artifacts:
+    - `/data/trading-ops/artifacts/reports/reconcile_<snapshot_date>_*.md`
+    - Updated `docs/RECONCILIATION_SOP.md`, `docs/RUNBOOK.md`
+
+- [x] **M12.2 Ticket final polish + stable schema-safe queries**
+  - Objective: Ensure ticket format is stable and operator-friendly; all DB read queries remain schema-safe.
+  - Commands:
+    - `make run-1400 && make tickets-last`
+    - `DRYRUN_TRADES=true make run-1400 && make tickets-last`
+  - Verification:
+    - Ticket rendering is deterministic (ordering/formatting stable across re-runs for same inputs).
+    - Queries avoid `select *` and do not assume optional columns exist.
+  - Artifacts:
+    - `/data/trading-ops/artifacts/tickets/<ticket_id>/ticket.md`
+
+- [ ] **M12.3 Scheduler validation + log retention (file-only)**
+  - Objective: Validate scheduled 08:00/14:00 runs are operating and keep logs/artifacts bounded on disk.
+  - Commands:
+    - `docker ps`
+    - `docker logs --tail 200 trading-ops-scheduler`
+  - Verification:
+    - Scheduler is running and emitting expected cadence logs.
+    - Retention mechanism exists (file-only) and is documented (what it deletes, what it keeps).
+
+- [ ] **M12.4 End-to-end “day simulation” script**
+  - Objective: One deterministic command to simulate a full day: 08:00 fetch → reconcile → 14:00 ticket → confirm → reconcile report.
+  - Commands:
+    - `bash scripts/day_simulate.sh --date YYYY-MM-DD --dryrun-trades`
+  - Verification:
+    - Script produces a single folder under `/data/trading-ops/artifacts/` containing run ids + ticket ids + confirmation + final reconcile report.

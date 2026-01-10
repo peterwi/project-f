@@ -229,17 +229,16 @@ def main() -> int:
             )
     risk_checks.append(("reconciliation", reconcile_ok, reconcile_detail))
 
-    latest_ticket_row = _psql_capture(
-        "select coalesce(ticket_id::text,'') || '|' || coalesce(ticket_type,'') from tickets order by created_at desc limit 1;"
-    )
-    latest_ticket, latest_ticket_type = ("", "")
-    if latest_ticket_row:
-        latest_ticket, latest_ticket_type = latest_ticket_row.split("|", 1)
+    latest_trade_ticket = _psql_capture(
+        "select coalesce(ticket_id::text,'') from tickets where ticket_type = 'TRADE' order by created_at desc limit 1;"
+    ).strip()
     confirm_ok = True
-    confirm_detail: dict = {"latest_ticket_id": (latest_ticket or None), "latest_ticket_type": (latest_ticket_type or None)}
-    if latest_ticket and latest_ticket_type == "TRADE":
-        intended_count = int(_psql_capture(f"select count(*) from ledger_trades_intended where ticket_id = '{latest_ticket}';") or "0")
-        confirmed_fills = int(_psql_capture(f"select count(*) from ledger_trades_fills where ticket_id = '{latest_ticket}';") or "0")
+    confirm_detail: dict = {"latest_trade_ticket_id": (latest_trade_ticket or None)}
+    if latest_trade_ticket:
+        intended_count = int(
+            _psql_capture(f"select count(*) from ledger_trades_intended where ticket_id = '{latest_trade_ticket}';") or "0"
+        )
+        confirmed_fills = int(_psql_capture(f"select count(*) from ledger_trades_fills where ticket_id = '{latest_trade_ticket}';") or "0")
         confirm_detail.update({"intended_count": intended_count, "fills_count": confirmed_fills})
         if intended_count > 0 and confirmed_fills < intended_count:
             confirm_ok = False
@@ -368,7 +367,6 @@ def main() -> int:
     approved = len(reasons) == 0 and all(p for _, p, _ in risk_checks)
     decision_type = "TRADE" if approved else "NO_TRADE"
 
-    _psql_exec(f"delete from risk_checks where run_id = '{run_id}';")
     for name, passed, detail in risk_checks:
         detail_json = json.dumps(detail).replace("'", "''")
         _psql_exec(
