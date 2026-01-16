@@ -291,6 +291,9 @@ def main() -> int:
             if args.asof_date:
                 mf_cmd += ["--end-date", args.asof_date]
             steps.append(_run_cmd("market-fetch", mf_cmd, accept_rcs=(0,)))
+        else:
+            # Deterministic proof that 14:00 did not refetch market data.
+            steps.append(StepResult("market-fetch", 0, True, "SKIPPED", "SKIPPED (cadence=1400; DB-only)\n", "", []))
 
         dq_cmd = ["python3", "scripts/data_quality_gate.py", "--run-id", run_id]
         if args.asof_date:

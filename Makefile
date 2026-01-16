@@ -41,6 +41,7 @@ help:
 	@echo "  make confirm          # submit ticket confirmation (defaults LAST_TICKET_ID)"
 	@echo "  make run-0800         # scheduled 08:00 UK pipeline run"
 	@echo "  make run-1400         # scheduled 14:00 UK pipeline run (NO refetch)"
+	@echo "  make test-harness     # one-command deterministic day test"
 	@echo "  make artifacts-retention # dry-run cleanup of old artifacts"
 	@echo "  make alerts-last      # print last 20 alerts"
 	@echo "  make runs-last        # print last 5 runs (DB schema-safe)"
@@ -202,7 +203,7 @@ fetch-eod: market-fetch
 .PHONY: data-quality
 data-quality:
 	@chmod +x scripts/data_quality_gate.py
-	@python3 scripts/data_quality_gate.py
+	@python3 scripts/data_quality_gate.py $(filter-out $@,$(MAKECMDGOALS))
 
 .PHONY: ledger-report
 ledger-report:
@@ -304,11 +305,16 @@ confirm-fills:
 
 .PHONY: run-0800
 run-0800:
-	@python3 scripts/run_scheduled.py --cadence 0800
+	@python3 scripts/run_scheduled.py --cadence 0800 $(filter-out $@,$(MAKECMDGOALS))
 
 .PHONY: run-1400
 run-1400:
-	@python3 scripts/run_scheduled.py --cadence 1400
+	@python3 scripts/run_scheduled.py --cadence 1400 $(filter-out $@,$(MAKECMDGOALS))
+
+.PHONY: test-harness
+test-harness:
+	@chmod +x scripts/test_harness.sh
+	@bash scripts/test_harness.sh $(filter-out $@,$(MAKECMDGOALS))
 
 .PHONY: artifacts-retention
 artifacts-retention:
@@ -360,7 +366,7 @@ market-actions-last:
 # Allow passing CLI args via extra MAKECMDGOALS, e.g.:
 #   make reconcile-add -- --snapshot-date 2025-12-22 --cash-gbp 25.88 --position AAPL=0.1
 # Only enabled when one of these targets is present to avoid masking typos.
-PASSTHRU_TARGETS := reconcile-add reconcile-daily reconcile-run stub-signals riskguard confirm-fills
+PASSTHRU_TARGETS := reconcile-add reconcile-daily reconcile-run stub-signals riskguard confirm-fills data-quality run-0800 run-1400 test-harness
 ifneq (,$(filter $(PASSTHRU_TARGETS),$(MAKECMDGOALS)))
 %:
 	@:
