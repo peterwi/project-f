@@ -178,6 +178,7 @@ def main() -> int:
     asof = date.fromisoformat(args.asof_date) if args.asof_date else auto_expected
 
     issues: list[str] = []
+    offenders: list[str] = []
 
     enabled_count = len(enabled_list)
     if enabled_count == 0:
@@ -217,6 +218,103 @@ def main() -> int:
             missing_benchmarks.append(b)
     if missing_benchmarks:
         issues.append(f"Missing benchmark bars for asof_date={asof}: {', '.join(missing_benchmarks)}")
+
+    # Critical NULL checks for asof_date (adj_close is required by downstream sizing/returns calculations).
+    null_adj = int(
+        _psql_capture(
+            f"""
+            select count(*)
+            from market_prices_eod
+            where trading_date = '{asof.isoformat()}'
+              and internal_symbol in (
+                select internal_symbol
+                from config_universe
+                where enabled = true
+                   or lower(coalesce(instrument_type,'')) in ('benchmark','index')
+              )
+              and adj_close is null
+            """
+        )
+        or "0"
+    )
+    if null_adj > 0:
+        issues.append(f"adj_close NULL rows at asof_date={asof}: {null_adj}")
+        offenders_raw = _psql_capture(
+            f"""
+            select internal_symbol || '|' || coalesce(source,'') || '|adj_close_null'
+            from market_prices_eod
+            where trading_date = '{asof.isoformat()}'
+              and adj_close is null
+            order by internal_symbol, source
+            limit 25;
+            """
+        )
+        offenders.extend([ln for ln in (offenders_raw.splitlines() if offenders_raw else []) if ln.strip()])
+
+    # Price/volume sanity checks (only when both operands are non-null).
+    bad_ohlc = int(
+        _psql_capture(
+            f"""
+            select count(*)
+            from market_prices_eod
+            where trading_date = '{asof.isoformat()}'
+              and (
+                (high is not null and low is not null and high < low)
+                or (volume is not null and volume < 0)
+                or (open is not null and open < 0)
+                or (high is not null and high < 0)
+                or (low is not null and low < 0)
+                or (close is not null and close < 0)
+                or (adj_close is not null and adj_close < 0)
+              )
+            """
+        )
+        or "0"
+    )
+    if bad_ohlc > 0:
+        issues.append(f"Price sanity failures at asof_date={asof}: {bad_ohlc}")
+        offenders_raw = _psql_capture(
+            f"""
+            select internal_symbol || '|' || coalesce(source,'') || '|' ||
+                   case
+                     when (high is not null and low is not null and high < low) then 'high_lt_low'
+                     when (volume is not null and volume < 0) then 'volume_lt_0'
+                     when (open is not null and open < 0) then 'open_lt_0'
+                     when (high is not null and high < 0) then 'high_lt_0'
+                     when (low is not null and low < 0) then 'low_lt_0'
+                     when (close is not null and close < 0) then 'close_lt_0'
+                     when (adj_close is not null and adj_close < 0) then 'adj_close_lt_0'
+                     else 'unknown'
+                   end
+            from market_prices_eod
+            where trading_date = '{asof.isoformat()}'
+              and (
+                (high is not null and low is not null and high < low)
+                or (volume is not null and volume < 0)
+                or (open is not null and open < 0)
+                or (high is not null and high < 0)
+                or (low is not null and low < 0)
+                or (close is not null and close < 0)
+                or (adj_close is not null and adj_close < 0)
+              )
+            order by internal_symbol, source
+            limit 25;
+            """
+        )
+        offenders.extend([ln for ln in (offenders_raw.splitlines() if offenders_raw else []) if ln.strip()])
+
+    # Staleness: benchmark max date should be >= asof_date used.
+    if benchmark_list:
+        quoted = ",".join("'" + b.replace("'", "''") + "'" for b in benchmark_list)
+        max_bm_date = _psql_capture(
+            f"""
+            select coalesce(max(trading_date)::text,'')
+            from market_prices_eod
+            where internal_symbol in ({quoted});
+            """
+        )
+        if max_bm_date and max_bm_date < asof.isoformat():
+            issues.append(f"Benchmark staleness: max benchmark trading_date={max_bm_date} < asof_date={asof.isoformat()}")
 
     # Duplicate detection (should be impossible but verify).
     duplicates = int(
@@ -276,6 +374,14 @@ def main() -> int:
     else:
         lines.append("- None")
     lines.append("")
+    lines.append("## Top Offending Rows (symbol|source|issue)")
+    lines.append("")
+    if offenders:
+        for ln in sorted(set(offenders))[:50]:
+            lines.append(f"- `{ln}`")
+    else:
+        lines.append("- None")
+    lines.append("")
     lines.append("## Notes")
     lines.append("")
     lines.append("- For US holidays/half-days, rerun with `--asof-date YYYY-MM-DD` if needed.")
@@ -286,11 +392,14 @@ def main() -> int:
     # Store summary in Postgres
     details = {
         "issues": issues,
+        "offenders": sorted(set(offenders))[:200],
         "enabled_symbols": enabled_list,
         "benchmarks": benchmark_list,
         "duplicates_detected": duplicates,
+        "null_adj_close_asof": null_adj,
+        "price_sanity_failures_asof": bad_ohlc,
     }
-    details_json = json.dumps(details).replace("'", "''")
+    details_json = json.dumps(details, sort_keys=True).replace("'", "''")
 
     _psql_exec(
         f"""
