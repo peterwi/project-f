@@ -8,7 +8,7 @@ COMPOSE_FILE="${ROOT_DIR}/docker/compose.yml"
 usage() {
   cat <<'EOF'
 Usage:
-  bash scripts/day_simulate.sh --date YYYY-MM-DD [--dryrun-trades]
+  bash scripts/day_simulate.sh --date YYYY-MM-DD [--dryrun-trades] [--seed-missing-fills]
 
 Simulates a full deterministic "day":
   08:00 fetch -> reconcile -> 14:00 ticket -> confirm -> final reconcile report
@@ -40,6 +40,23 @@ extract_kv_from_file() {
   awk -F= -v k="$key" '$0 ~ ("^" k "=") {print substr($0, length(k)+2); exit}' "$file"
 }
 
+set_kv_file() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  if grep -qE "^${key}=" "$file"; then
+    sed -i -E "s|^${key}=.*|${key}=${value}|" "$file"
+  else
+    echo "${key}=${value}" >>"$file"
+  fi
+}
+
+set_kv() {
+  local key="$1"
+  local value="$2"
+  set_kv_file "${OUT_DIR}/ids.env" "$key" "$value"
+}
+
 psql_capture() {
   local sql="$1"
   docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" exec -T postgres \
@@ -67,6 +84,7 @@ copy_into() {
 
 DATE=""
 DRYRUN_TRADES="false"
+SEED_MISSING_FILLS="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -76,6 +94,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --dryrun-trades)
       DRYRUN_TRADES="true"
+      shift
+      ;;
+    --seed-missing-fills)
+      SEED_MISSING_FILLS="true"
       shift
       ;;
     -h|--help)
@@ -112,9 +134,10 @@ mkdir -p "${OUT_DIR}/"{logs,runs,tickets,confirmations,reconcile,inputs}
 
 echo "${OUT_DIR}" >"${OUT_DIR}/_path.txt"
 echo "date=${DATE}" >"${OUT_DIR}/ids.env"
-echo "git_commit=${GIT_COMMIT}" >>"${OUT_DIR}/ids.env"
-echo "git_short=${GIT_SHORT}" >>"${OUT_DIR}/ids.env"
-echo "dryrun_trades=${DRYRUN_TRADES}" >>"${OUT_DIR}/ids.env"
+set_kv "git_commit" "${GIT_COMMIT}"
+set_kv "git_short" "${GIT_SHORT}"
+set_kv "dryrun_trades" "${DRYRUN_TRADES}"
+set_kv "seed_missing_fills" "${SEED_MISSING_FILLS}"
 
 copy_into "${ROOT_DIR}/config/universe.csv" "${OUT_DIR}/inputs/universe.csv"
 copy_into "${ROOT_DIR}/config/policy.yml" "${OUT_DIR}/inputs/policy.yml"
@@ -125,7 +148,7 @@ run_capture "make_health" make health
 run_capture "run_0800" python3 scripts/run_scheduled.py --cadence 0800 --asof-date "${DATE}"
 RUN_0800_ID="$(extract_kv_from_file run_id "${OUT_DIR}/logs/run_0800.stdout.log")"
 [[ -n "$RUN_0800_ID" ]] || die "Failed to capture 0800 run_id"
-echo "run_0800_id=${RUN_0800_ID}" >>"${OUT_DIR}/ids.env"
+set_kv "run_0800_id" "${RUN_0800_ID}"
 copy_into "${ARTIFACTS_DIR}/runs/${RUN_0800_ID}/run_summary.md" "${OUT_DIR}/runs/0800_run_summary.md"
 
 # Reconcile snapshot (SIMULATED) -> reconcile gate PASS
@@ -150,40 +173,187 @@ echo "reconcile_report_pre_path=${REPORT_PRE_PATH}" >>"${OUT_DIR}/ids.env"
 copy_into "${REPORT_PRE_PATH}" "${OUT_DIR}/reconcile/reconcile_pre_1400.md"
 
 # 14:00 scheduled (ticket)
-if [[ "$DRYRUN_TRADES" == "true" ]]; then
-  run_capture "run_1400" env DRYRUN_TRADES=true python3 scripts/run_scheduled.py --cadence 1400 --asof-date "${DATE}"
-else
-  run_capture "run_1400" python3 scripts/run_scheduled.py --cadence 1400 --asof-date "${DATE}"
-fi
-RUN_1400_ID="$(extract_kv_from_file run_id "${OUT_DIR}/logs/run_1400.stdout.log")"
-[[ -n "$RUN_1400_ID" ]] || die "Failed to capture 1400 run_id"
-echo "run_1400_id=${RUN_1400_ID}" >>"${OUT_DIR}/ids.env"
-copy_into "${ARTIFACTS_DIR}/runs/${RUN_1400_ID}/run_summary.md" "${OUT_DIR}/runs/1400_run_summary.md"
-copy_into "${ARTIFACTS_DIR}/runs/${RUN_1400_ID}/trades_intended.json" "${OUT_DIR}/runs/1400_trades_intended.json"
-
-run_capture "tickets_last" make tickets-last
-TICKET_1400_ID="$(psql_capture "select coalesce(ticket_id::text,'') from tickets where run_id = '${RUN_1400_ID}' order by created_at desc limit 1;")"
-[[ -n "$TICKET_1400_ID" ]] || die "Failed to resolve ticket_id for run_id=${RUN_1400_ID}"
-echo "ticket_1400_id=${TICKET_1400_ID}" >>"${OUT_DIR}/ids.env"
-
 TICKET_0800_ID="$(psql_capture "select coalesce(ticket_id::text,'') from tickets where run_id = '${RUN_0800_ID}' order by created_at desc limit 1;")"
 if [[ -n "$TICKET_0800_ID" ]]; then
-  echo "ticket_0800_id=${TICKET_0800_ID}" >>"${OUT_DIR}/ids.env"
+  set_kv "ticket_0800_id" "${TICKET_0800_ID}"
 fi
 
-TICKET_DIR="${ARTIFACTS_DIR}/tickets/${TICKET_1400_ID}"
-copy_into "${TICKET_DIR}/ticket.md" "${OUT_DIR}/tickets/ticket_1400.md"
-copy_into "${TICKET_DIR}/ticket.json" "${OUT_DIR}/tickets/ticket_1400.json"
-copy_into "${TICKET_DIR}/material_hash.txt" "${OUT_DIR}/tickets/material_hash_1400.txt"
+run_1400_once() {
+  local capture_name="$1"
+  if [[ "$DRYRUN_TRADES" == "true" ]]; then
+    run_capture "${capture_name}" env DRYRUN_TRADES=true python3 scripts/run_scheduled.py --cadence 1400 --asof-date "${DATE}"
+  else
+    run_capture "${capture_name}" python3 scripts/run_scheduled.py --cadence 1400 --asof-date "${DATE}"
+  fi
+}
 
-material_hash_1400=""
-if [[ -f "${TICKET_DIR}/material_hash.txt" ]]; then
-  material_hash_1400="$(cat "${TICKET_DIR}/material_hash.txt" | tr -d '\n' || true)"
+snapshot_1400_artifacts() {
+  local label="$1"
+  copy_into "${ARTIFACTS_DIR}/runs/${RUN_1400_ID}/run_summary.md" "${OUT_DIR}/runs/1400_run_summary${label}.md"
+  copy_into "${ARTIFACTS_DIR}/runs/${RUN_1400_ID}/trades_intended.json" "${OUT_DIR}/runs/1400_trades_intended${label}.json"
+  copy_into "${ARTIFACTS_DIR}/runs/${RUN_1400_ID}/no_trade.json" "${OUT_DIR}/runs/no_trade_1400${label}.json"
+  copy_into "${ARTIFACTS_DIR}/tickets/${TICKET_1400_ID}/ticket.md" "${OUT_DIR}/tickets/ticket_1400${label}.md"
+  copy_into "${ARTIFACTS_DIR}/tickets/${TICKET_1400_ID}/ticket.json" "${OUT_DIR}/tickets/ticket_1400${label}.json"
+  copy_into "${ARTIFACTS_DIR}/tickets/${TICKET_1400_ID}/material_hash.txt" "${OUT_DIR}/tickets/material_hash_1400${label}.txt"
+}
+
+finalize_1400_vars_and_copy() {
+  RUN_1400_ID="$(extract_kv_from_file run_id "${OUT_DIR}/logs/${RUN_1400_CAPTURE}.stdout.log")"
+  [[ -n "$RUN_1400_ID" ]] || die "Failed to capture 1400 run_id"
+  run_capture "tickets_last_${RUN_1400_CAPTURE}" make tickets-last
+  TICKET_1400_ID="$(psql_capture "select coalesce(ticket_id::text,'') from tickets where run_id = '${RUN_1400_ID}' order by created_at desc limit 1;")"
+  [[ -n "$TICKET_1400_ID" ]] || die "Failed to resolve ticket_id for run_id=${RUN_1400_ID}"
+
+  local ticket_dir="${ARTIFACTS_DIR}/tickets/${TICKET_1400_ID}"
+  material_hash_1400=""
+  if [[ -f "${ticket_dir}/material_hash.txt" ]]; then
+    material_hash_1400="$(cat "${ticket_dir}/material_hash.txt" | tr -d '\n' || true)"
+  fi
+  decision_type="$(python3 -c "import json; print((json.load(open('${ticket_dir}/ticket.json')) or {}).get('decision_type',''))")"
+
+  copy_into "${ARTIFACTS_DIR}/runs/${RUN_1400_ID}/run_summary.md" "${OUT_DIR}/runs/1400_run_summary.md"
+  copy_into "${ARTIFACTS_DIR}/runs/${RUN_1400_ID}/trades_intended.json" "${OUT_DIR}/runs/1400_trades_intended.json"
+  copy_into "${ticket_dir}/ticket.md" "${OUT_DIR}/tickets/ticket_1400.md"
+  copy_into "${ticket_dir}/ticket.json" "${OUT_DIR}/tickets/ticket_1400.json"
+  copy_into "${ticket_dir}/material_hash.txt" "${OUT_DIR}/tickets/material_hash_1400.txt"
+
+  if [[ "$decision_type" == "NO_TRADE" ]]; then
+    copy_into "${ARTIFACTS_DIR}/runs/${RUN_1400_ID}/no_trade.json" "${OUT_DIR}/runs/no_trade_1400.json"
+  fi
+}
+
+RUN_1400_CAPTURE="run_1400"
+run_1400_once "${RUN_1400_CAPTURE}"
+finalize_1400_vars_and_copy
+
+set_kv "run_1400_id" "${RUN_1400_ID}"
+set_kv "ticket_1400_id" "${TICKET_1400_ID}"
+set_kv "material_hash_1400" "${material_hash_1400}"
+set_kv "ticket_1400_decision_type" "${decision_type}"
+
+seeded_missing_fills="false"
+seeded_ticket_id=""
+if [[ "$SEED_MISSING_FILLS" == "true" && "$decision_type" == "NO_TRADE" && -f "${OUT_DIR}/runs/no_trade_1400.json" ]]; then
+  seeded_ticket_id="$(python3 - <<'PY' "${OUT_DIR}/runs/no_trade_1400.json"
+import json
+import sys
+
+path = sys.argv[1]
+j = json.loads(open(path, encoding="utf-8").read())
+
+codes = sorted({str(r.get("code") or "") for r in (j.get("reasons") or [])})
+if "CONFIRMATION_MISSING" not in codes:
+  raise SystemExit(0)
+
+conf = None
+for rc in (j.get("risk_checks") or []):
+  if rc.get("name") == "confirmations":
+    conf = rc.get("detail") or {}
+    break
+tid = (conf or {}).get("latest_trade_ticket_id") or ""
+print(tid)
+PY
+  )"
+  if [[ -n "$seeded_ticket_id" ]]; then
+    RUN_1400_ID_INITIAL="${RUN_1400_ID}"
+    TICKET_1400_ID_INITIAL="${TICKET_1400_ID}"
+    seeded_missing_fills="true"
+    set_kv "seeded_missing_fills" "true"
+    set_kv "seeded_ticket_id" "${seeded_ticket_id}"
+
+    FILLS_SEED_PATH="${OUT_DIR}/inputs/fills_seed.json"
+    intended_rows="$(psql_capture "select sequence::text || '|' || internal_symbol || '|' || side || '|' || coalesce(units::text,'') || '|' || coalesce(notional_value_base::text,'') || '|' || coalesce(limit_price::text, reference_price::text,'') from ledger_trades_intended where ticket_id = '${seeded_ticket_id}' order by sequence;")"
+    [[ -n "$intended_rows" ]] || die "seed-missing-fills: no ledger_trades_intended rows found for ticket_id=${seeded_ticket_id}"
+    INTENDED_ROWS="$intended_rows" python3 - <<'PY' "${FILLS_SEED_PATH}" "${seeded_ticket_id}"
+import json
+import os
+import sys
+from decimal import Decimal, InvalidOperation
+import math
+
+out_path = sys.argv[1]
+ticket_id = sys.argv[2]
+
+def _stable_num_str(s: str) -> str:
+  raw = (s or "").strip()
+  if raw == "":
+    return ""
+  try:
+    d = Decimal(raw)
+  except InvalidOperation:
+    return raw
+  return format(d.normalize(), "f")
+
+fills = []
+for line in (os.environ.get("INTENDED_ROWS", "") or "").splitlines():
+  if not line.strip():
+    continue
+  seq_s, sym, side, units_s, notional_s, price_s = line.split("|", 5)
+  units_out = None
+  units_raw = (units_s or "").strip()
+  if units_raw != "":
+    units_out = _stable_num_str(units_raw)
+  else:
+    notional_raw = (notional_s or "").strip()
+    price_raw = (price_s or "").strip()
+    if notional_raw != "" and price_raw != "":
+      try:
+        notional = float(notional_raw)
+        price = float(price_raw)
+        if price > 0:
+          units_out = str(int(math.floor(abs(notional) / price)))
+      except Exception:
+        units_out = None
+
+  fill_price_out = None
+  price_raw = (price_s or "").strip()
+  if price_raw != "":
+    fill_price_out = _stable_num_str(price_raw)
+  fills.append(
+    {
+      "sequence": int(seq_s),
+      "internal_symbol": sym,
+      "side": side,
+      "executed_status": "SKIPPED",
+      "units": units_out,
+      "fill_price": fill_price_out,
+      "executed_value_base": None,
+      "filled_at": None,
+      "notes": "SEEDED_FROM_LEDGER_TRADES_INTENDED",
+    }
+  )
+fills.sort(key=lambda r: int(r["sequence"]))
+
+out = {"schema_version": "v1", "ticket_id": ticket_id, "fills": fills}
+with open(out_path, "w", encoding="utf-8") as f:
+  f.write(json.dumps(out, indent=2, sort_keys=True) + "\n")
+PY
+
+    run_capture "seed_missing_fills_confirm" env FILLS_JSON="${FILLS_SEED_PATH}" make confirm-fills -- --ticket-id "${seeded_ticket_id}" --submitted-by "day_simulate" --notes "SEEDED_BY_DAY_SIMULATE"
+
+    copy_into "${OUT_DIR}/runs/1400_run_summary.md" "${OUT_DIR}/runs/1400_run_summary_initial.md"
+    copy_into "${OUT_DIR}/runs/1400_trades_intended.json" "${OUT_DIR}/runs/1400_trades_intended_initial.json"
+    copy_into "${OUT_DIR}/tickets/ticket_1400.md" "${OUT_DIR}/tickets/ticket_1400_initial.md"
+    copy_into "${OUT_DIR}/tickets/ticket_1400.json" "${OUT_DIR}/tickets/ticket_1400_initial.json"
+    copy_into "${OUT_DIR}/tickets/material_hash_1400.txt" "${OUT_DIR}/tickets/material_hash_1400_initial.txt"
+    copy_into "${OUT_DIR}/runs/no_trade_1400.json" "${OUT_DIR}/runs/no_trade_1400_initial.json"
+
+    RUN_1400_CAPTURE="run_1400_after_seed"
+    run_1400_once "${RUN_1400_CAPTURE}"
+    finalize_1400_vars_and_copy
+
+    set_kv "run_1400_id_initial" "${RUN_1400_ID_INITIAL}"
+    set_kv "ticket_1400_id_initial" "${TICKET_1400_ID_INITIAL}"
+    set_kv "run_1400_id" "${RUN_1400_ID}"
+    set_kv "ticket_1400_id" "${TICKET_1400_ID}"
+    set_kv "material_hash_1400" "${material_hash_1400}"
+    set_kv "ticket_1400_decision_type" "${decision_type}"
+
+    if [[ "$decision_type" != "NO_TRADE" ]]; then
+      rm -f "${OUT_DIR}/runs/no_trade_1400.json"
+    fi
+  fi
 fi
-echo "material_hash_1400=${material_hash_1400}" >>"${OUT_DIR}/ids.env"
-
-decision_type="$(python3 -c "import json; print((json.load(open('${TICKET_DIR}/ticket.json')) or {}).get('decision_type',''))")"
-echo "ticket_1400_decision_type=${decision_type}" >>"${OUT_DIR}/ids.env"
 
 # Confirm
 FILLS_JSON_PATH=""
@@ -212,18 +382,16 @@ for i, t in enumerate(trades, start=1):
     "sequence": i,
     "internal_symbol": sym,
     "side": side,
-    "executed_status": "DONE",
+    "executed_status": "SKIPPED",
     "units": units,
     "fill_price": px,
-    "executed_value_base": abs(units * px),
-    "filled_at": f"{date_s}T14:00:00Z",
     "notes": "SIMULATED_FILL_FROM_TRADES_INTENDED"
   })
 
 out = {"schema_version": "v1", "run_id": run_id, "asof_date": date_s, "fills": fills}
 out_path.write_text(json.dumps(out, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
-  run_capture "confirm_fills" env FILLS_JSON="${FILLS_JSON_PATH}" make confirm-fills -- --ticket-id "${TICKET_1400_ID}" --notes "SIM_DAY_SIMULATE:${DATE}"
+  run_capture "confirm_fills" env FILLS_JSON="${FILLS_JSON_PATH}" make confirm-fills -- --ticket-id "${TICKET_1400_ID}" --submitted-by "day_simulate" --notes "SIM_DAY_SIMULATE:${DATE}"
 else
   die "Unexpected decision_type in ticket.json: ${decision_type}"
 fi
@@ -272,6 +440,7 @@ cat >"${OUT_DIR}/README.md" <<EOF
 - artifacts_dir: \`${ARTIFACTS_DIR}\`
 - simulation_dir: \`${OUT_DIR}\`
 - dryrun_trades (14:00): \`${DRYRUN_TRADES}\`
+- seed-missing-fills: \`${SEED_MISSING_FILLS}\`
 
 ## IDs
 
@@ -297,6 +466,12 @@ cat >"${OUT_DIR}/README.md" <<EOF
   - \`${OUT_DIR}/tickets/ticket_1400.json\`
   - \`${OUT_DIR}/tickets/material_hash_1400.txt\`
 
+## Seeded fills (only when requested + applicable)
+
+- seeded_missing_fills: \`${seeded_missing_fills}\`
+- ticket_id_fixed: \`${seeded_ticket_id}\`
+- fills_seed_json: \`${OUT_DIR}/inputs/fills_seed.json\`
+
 ## Confirmation
 
 - confirmation artifacts:
@@ -308,5 +483,52 @@ cat >"${OUT_DIR}/README.md" <<EOF
 
 - stdout/stderr captured under: \`${OUT_DIR}/logs/\`
 EOF
+
+if [[ "$decision_type" == "NO_TRADE" ]]; then
+  {
+    echo ""
+    echo "## Why NO_TRADE"
+    echo ""
+    if [[ -f "${OUT_DIR}/runs/no_trade_1400.json" ]]; then
+      python3 - <<'PY' "${OUT_DIR}/runs/no_trade_1400.json"
+import json
+import sys
+
+path = sys.argv[1]
+j = json.loads(open(path, encoding="utf-8").read())
+
+reasons = []
+for r in (j.get("reasons") or []):
+  code = str(r.get("code") or "")
+  detail = str(r.get("detail") or "")
+  reasons.append((code, detail))
+reasons.sort(key=lambda x: (x[0], x[1]))
+
+print("Blocking reasons (verbatim):")
+for code, detail in reasons:
+  print(f"- {code}: {detail}")
+
+conf = None
+for rc in (j.get("risk_checks") or []):
+  if rc.get("name") == "confirmations":
+    conf = rc.get("detail") or {}
+    break
+
+if conf is not None:
+  latest = str(conf.get("latest_trade_ticket_id") or "")
+  fills_count = conf.get("fills_count")
+  intended_count = conf.get("intended_count")
+  print("")
+  print("Confirmations gate (if relevant):")
+  print(f"- latest_trade_ticket_id: {latest}")
+  print(f"- fills_count: {'' if fills_count is None else fills_count}")
+  print(f"- intended_count: {'' if intended_count is None else intended_count}")
+PY
+    else
+      echo "Blocking reasons (verbatim):"
+      echo "- (missing \`${OUT_DIR}/runs/no_trade_1400.json\`)"
+    fi
+  } >>"${OUT_DIR}/README.md"
+fi
 
 echo "OK: ${OUT_DIR}"
