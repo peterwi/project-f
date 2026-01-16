@@ -275,11 +275,12 @@ CREATE TEMP TABLE prices_stage (
   close numeric,
   adj_close numeric,
   volume bigint,
+  currency text,
   source text NOT NULL,
   quality_flags jsonb NOT NULL
 );
 
-COPY prices_stage (internal_symbol, trading_date, open, high, low, close, adj_close, volume, source, quality_flags)
+COPY prices_stage (internal_symbol, trading_date, open, high, low, close, adj_close, volume, currency, source, quality_flags)
 FROM STDIN WITH (FORMAT csv);
 """.lstrip()
     )
@@ -296,6 +297,7 @@ FROM STDIN WITH (FORMAT csv);
                 decimal_to_str(r.close),
                 decimal_to_str(r.adj_close),
                 (str(r.volume) if r.volume is not None else ""),
+                (r.currency or ""),
                 r.source,
                 canonical_json(r.quality_flags or {}),
             ]
@@ -305,10 +307,10 @@ FROM STDIN WITH (FORMAT csv);
     copy_lines.append(
         """
 INSERT INTO market_prices_eod (
-  internal_symbol, trading_date, open, high, low, close, adj_close, volume, source, quality_flags
+  internal_symbol, trading_date, open, high, low, close, adj_close, volume, currency, source, quality_flags
 )
 SELECT
-  internal_symbol, trading_date, open, high, low, close, adj_close, volume, source, quality_flags
+  internal_symbol, trading_date, open, high, low, close, adj_close, volume, currency, source, quality_flags
 FROM prices_stage
 ON CONFLICT (internal_symbol, trading_date, source) DO UPDATE SET
   open = excluded.open,
@@ -317,6 +319,7 @@ ON CONFLICT (internal_symbol, trading_date, source) DO UPDATE SET
   close = excluded.close,
   adj_close = excluded.adj_close,
   volume = excluded.volume,
+  currency = excluded.currency,
   quality_flags = excluded.quality_flags;
 COMMIT;
 """.lstrip()

@@ -24,6 +24,8 @@ help:
 	@echo "  make universe-validate # generate validation report"
 	@echo "  make market-fetch     # fetch EOD prices (Stooq)"
 	@echo "  make fetch-eod        # alias for market-fetch"
+	@echo "  make market-prices-last # show latest market prices per symbol"
+	@echo "  make market-actions-last # show corporate actions table stats"
 	@echo "  make data-quality     # run data quality gate"
 	@echo "  make ledger-report    # write ledger report"
 	@echo "  make reconcile-add    # add reconciliation snapshot"
@@ -327,6 +329,22 @@ tickets-last:
 	docker compose -f "$(COMPOSE_FILE)" --env-file "$(ENV_FILE)" exec -T postgres \
 	  psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
 	  "select t.ticket_id, t.created_at, t.status, t.ticket_type, t.run_id, coalesce((t.rendered_json->>'asof_date')::date, r.asof_date) as asof_date from tickets t join runs r on r.run_id=t.run_id order by t.created_at desc limit 5;"
+
+.PHONY: market-prices-last
+market-prices-last:
+	@set -euo pipefail; \
+	set -a; source "$(ENV_FILE)"; set +a; \
+	docker compose -f "$(COMPOSE_FILE)" --env-file "$(ENV_FILE)" exec -T postgres \
+	  psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+	  "with u as (select internal_symbol from config_universe where enabled=true or lower(coalesce(instrument_type,'')) in ('benchmark','index')) select p.internal_symbol, max(p.trading_date) as max_trading_date, count(*) as rows, coalesce(min(p.source),'') as sample_source from market_prices_eod p join u on u.internal_symbol=p.internal_symbol group by p.internal_symbol order by p.internal_symbol;";
+
+.PHONY: market-actions-last
+market-actions-last:
+	@set -euo pipefail; \
+	set -a; source "$(ENV_FILE)"; set +a; \
+	docker compose -f "$(COMPOSE_FILE)" --env-file "$(ENV_FILE)" exec -T postgres \
+	  psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+	  "select 'dividends' as table_name, count(*) as rows, coalesce(max(ex_date)::text,'') as max_ex_date from market_actions_dividends union all select 'splits' as table_name, count(*) as rows, coalesce(max(ex_date)::text,'') as max_ex_date from market_actions_splits order by table_name;";
 
 # Allow passing CLI args via extra MAKECMDGOALS, e.g.:
 #   make reconcile-add -- --snapshot-date 2025-12-22 --cash-gbp 25.88 --position AAPL=0.1
