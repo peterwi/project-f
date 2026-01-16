@@ -130,7 +130,7 @@ GIT_SHORT="$(git -c safe.directory=* -C "$ROOT_DIR" rev-parse --short HEAD)"
 UTCSTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
 OUT_DIR="${ARTIFACTS_DIR}/day_sim/${DATE}/${UTCSTAMP}-git${GIT_SHORT}"
-mkdir -p "${OUT_DIR}/"{logs,runs,tickets,confirmations,reconcile,inputs}
+mkdir -p "${OUT_DIR}/"{logs,runs,tickets,confirmations,reconcile,inputs,signals}
 
 echo "${OUT_DIR}" >"${OUT_DIR}/_path.txt"
 echo "date=${DATE}" >"${OUT_DIR}/ids.env"
@@ -208,6 +208,9 @@ snapshot_1400_artifacts() {
   copy_into "${ARTIFACTS_DIR}/tickets/${TICKET_1400_ID}/ticket.md" "${OUT_DIR}/tickets/ticket_1400${label}.md"
   copy_into "${ARTIFACTS_DIR}/tickets/${TICKET_1400_ID}/ticket.json" "${OUT_DIR}/tickets/ticket_1400${label}.json"
   copy_into "${ARTIFACTS_DIR}/tickets/${TICKET_1400_ID}/material_hash.txt" "${OUT_DIR}/tickets/material_hash_1400${label}.txt"
+  copy_into "${ARTIFACTS_DIR}/signals/${RUN_1400_ID}/signals_ranked.csv" "${OUT_DIR}/signals/signals_ranked${label}.csv"
+  copy_into "${ARTIFACTS_DIR}/signals/${RUN_1400_ID}/features.csv" "${OUT_DIR}/signals/features${label}.csv"
+  copy_into "${ARTIFACTS_DIR}/signals/${RUN_1400_ID}/README.md" "${OUT_DIR}/signals/README${label}.md"
 }
 
 finalize_1400_vars_and_copy() {
@@ -229,6 +232,9 @@ finalize_1400_vars_and_copy() {
   copy_into "${ticket_dir}/ticket.md" "${OUT_DIR}/tickets/ticket_1400.md"
   copy_into "${ticket_dir}/ticket.json" "${OUT_DIR}/tickets/ticket_1400.json"
   copy_into "${ticket_dir}/material_hash.txt" "${OUT_DIR}/tickets/material_hash_1400.txt"
+  copy_into "${ARTIFACTS_DIR}/signals/${RUN_1400_ID}/signals_ranked.csv" "${OUT_DIR}/signals/signals_ranked.csv"
+  copy_into "${ARTIFACTS_DIR}/signals/${RUN_1400_ID}/features.csv" "${OUT_DIR}/signals/features.csv"
+  copy_into "${ARTIFACTS_DIR}/signals/${RUN_1400_ID}/README.md" "${OUT_DIR}/signals/README.md"
 
   if [[ "$decision_type" == "NO_TRADE" ]]; then
     copy_into "${ARTIFACTS_DIR}/runs/${RUN_1400_ID}/no_trade.json" "${OUT_DIR}/runs/no_trade_1400.json"
@@ -537,6 +543,13 @@ cat >"${OUT_DIR}/README.md" <<EOF
   - \`${OUT_DIR}/tickets/ticket_1400.md\`
   - \`${OUT_DIR}/tickets/ticket_1400.json\`
   - \`${OUT_DIR}/tickets/material_hash_1400.txt\`
+
+## Signals (model output)
+
+- signals artifacts:
+  - \`${OUT_DIR}/signals/signals_ranked.csv\`
+  - \`${OUT_DIR}/signals/features.csv\`
+  - \`${OUT_DIR}/signals/README.md\`
 
 ## Seeded fills (confirmations unblock helper)
 

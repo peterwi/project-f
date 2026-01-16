@@ -504,6 +504,48 @@ def _parse_run_summary_steps(path: Path) -> dict[str, str]:
     return steps
 
 
+def _parse_run_summary_step_reports(path: Path) -> dict[str, list[str]]:
+    """
+    Parse report paths under each step in the `## Steps` section of run_summary.md.
+    Expected lines like:
+      - market-fetch: `OK`
+        - report: `/data/...`
+    """
+    txt = path.read_text(encoding="utf-8").splitlines()
+    in_steps = False
+    current_step: str | None = None
+    reports: dict[str, list[str]] = {}
+    for raw in txt:
+        if raw.startswith("## "):
+            in_steps = raw.strip() == "## Steps"
+            current_step = None
+            continue
+        if not in_steps:
+            continue
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("- ") and ": `" in line and line.endswith("`") and not line.startswith("- report:"):
+            name, rest = line[2:].split(": ", 1)
+            if rest.startswith("`") and rest.endswith("`"):
+                current_step = name.strip()
+                reports.setdefault(current_step, [])
+            continue
+        if line.startswith("- report:") and current_step:
+            # Pattern: - report: `<path>`
+            if "`" in line:
+                parts = line.split("`")
+                if len(parts) >= 2:
+                    p = parts[1].strip()
+                    if p:
+                        reports.setdefault(current_step, []).append(p)
+    # Deterministic de-dupe + ordering per step.
+    out: dict[str, list[str]] = {}
+    for k in sorted(reports.keys()):
+        out[k] = sorted(set(reports[k]))
+    return out
+
+
 def _render_ticket_md(payload: dict) -> str:
     reasons_json = json.dumps(payload.get("blocking_reasons", []), indent=2, sort_keys=True)
     gate_statuses_json = json.dumps(payload.get("gate_statuses", {}), indent=2, sort_keys=True)
@@ -542,6 +584,18 @@ def _render_ticket_md(payload: dict) -> str:
     lines.append(gate_statuses_json)
     lines.append("```")
     lines.append("")
+    step_reports = (payload.get("gate_statuses") or {}).get("ops_step_reports") or {}
+    if isinstance(step_reports, dict) and step_reports:
+        lines.append("## Data & model artifacts")
+        lines.append("")
+        for step_name in sorted(step_reports.keys()):
+            paths = step_reports.get(step_name) or []
+            if not isinstance(paths, list) or not paths:
+                continue
+            lines.append(f"- {step_name}:")
+            for p in sorted({str(x) for x in paths if x}):
+                lines.append(f"  - `{p}`")
+        lines.append("")
     lines.append("## Inputs (pointers)")
     lines.append("")
     for k, v in payload.get("inputs", {}).items():
@@ -689,11 +743,12 @@ def main() -> int:
     run_meta = _run_metadata(run_id)
     universe = {**_universe_counts(), **_universe_symbols()}
     ops_steps = _parse_run_summary_steps(inputs.run_summary_md)
+    ops_step_reports = _parse_run_summary_step_reports(inputs.run_summary_md)
 
     decision_type = "NO_TRADE" if inputs.no_trade_json else "TRADE"
     ticket_id = _get_or_create_ticket_id(run_id, decision_type)
 
-    gate_statuses: dict = {"ops_steps": ops_steps}
+    gate_statuses: dict = {"ops_steps": ops_steps, "ops_step_reports": ops_step_reports}
     blocking_reasons: list[dict] = []
     no_trade_asof: str = ""
     risk_checks = _load_risk_checks_for_run(run_id)
