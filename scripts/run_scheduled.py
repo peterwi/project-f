@@ -286,7 +286,10 @@ def main() -> int:
         steps.append(_run_cmd("universe-validate", ["make", "universe-validate"], accept_rcs=(0,)))
 
         if args.cadence == "0800":
-            steps.append(_run_cmd("market-fetch", ["make", "market-fetch"], accept_rcs=(0,)))
+            mf_cmd = ["python3", "scripts/market_fetch_eod.py"]
+            if args.asof_date:
+                mf_cmd += ["--end-date", args.asof_date]
+            steps.append(_run_cmd("market-fetch", mf_cmd, accept_rcs=(0,)))
 
         dq_cmd = ["python3", "scripts/data_quality_gate.py", "--run-id", run_id]
         if args.asof_date:
