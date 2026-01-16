@@ -144,6 +144,19 @@ copy_into "${ROOT_DIR}/config/policy.yml" "${OUT_DIR}/inputs/policy.yml"
 
 run_capture "make_health" make health
 
+# Baseline DB state (global; affects confirmations gate).
+baseline_db_latest_trade_ticket_id="$(psql_capture "select coalesce(ticket_id::text,'') from tickets where ticket_type='TRADE' order by created_at desc limit 1;")"
+baseline_db_intended_count="0"
+baseline_db_fills_count="0"
+if [[ -n "$baseline_db_latest_trade_ticket_id" ]]; then
+  baseline_counts="$(psql_capture "select (select count(*) from ledger_trades_intended where ticket_id='${baseline_db_latest_trade_ticket_id}'::uuid)::text || '|' || (select count(*) from ledger_trades_fills where ticket_id='${baseline_db_latest_trade_ticket_id}'::uuid)::text;")"
+  baseline_db_intended_count="${baseline_counts%%|*}"
+  baseline_db_fills_count="${baseline_counts##*|}"
+fi
+set_kv "baseline_db_latest_trade_ticket_id" "${baseline_db_latest_trade_ticket_id}"
+set_kv "baseline_db_intended_count" "${baseline_db_intended_count}"
+set_kv "baseline_db_fills_count" "${baseline_db_fills_count}"
+
 # 08:00 scheduled (includes market-fetch)
 run_capture "run_0800" python3 scripts/run_scheduled.py --cadence 0800 --asof-date "${DATE}"
 RUN_0800_ID="$(extract_kv_from_file run_id "${OUT_DIR}/logs/run_0800.stdout.log")"
@@ -231,8 +244,33 @@ set_kv "ticket_1400_id" "${TICKET_1400_ID}"
 set_kv "material_hash_1400" "${material_hash_1400}"
 set_kv "ticket_1400_decision_type" "${decision_type}"
 
+# Optional confirmations unblocking (deterministically seeds fills for the prior TRADE ticket if blocked).
 seeded_missing_fills="false"
-seeded_ticket_id=""
+seed_reason="not_triggered_no_confirmation_missing"
+seed_target_ticket_id=""
+seed_fills_intended_count="0"
+seed_fills_written_count="0"
+fills_seed_json=""
+seed_db_before_intended="0"
+seed_db_before_fills="0"
+seed_db_after_intended="0"
+seed_db_after_fills="0"
+
+if [[ "$SEED_MISSING_FILLS" == "true" ]]; then
+  # Candidate seed target: baseline latest TRADE ticket at sim start (may be overridden if no_trade.json specifies a different one).
+  seed_target_ticket_id="${baseline_db_latest_trade_ticket_id}"
+  if [[ -n "$seed_target_ticket_id" ]]; then
+    seed_counts="$(psql_capture "select (select count(*) from ledger_trades_intended where ticket_id='${seed_target_ticket_id}'::uuid)::text || '|' || (select count(*) from ledger_trades_fills where ticket_id='${seed_target_ticket_id}'::uuid)::text;")"
+    seed_db_before_intended="${seed_counts%%|*}"
+    seed_db_before_fills="${seed_counts##*|}"
+    seed_db_after_intended="${seed_db_before_intended}"
+    seed_db_after_fills="${seed_db_before_fills}"
+    if [[ "${seed_db_before_fills}" != "0" ]]; then
+      seed_reason="already_had_fills"
+    fi
+  fi
+fi
+
 if [[ "$SEED_MISSING_FILLS" == "true" && "$decision_type" == "NO_TRADE" && -f "${OUT_DIR}/runs/no_trade_1400.json" ]]; then
   seeded_ticket_id="$(python3 - <<'PY' "${OUT_DIR}/runs/no_trade_1400.json"
 import json
@@ -255,16 +293,23 @@ print(tid)
 PY
   )"
   if [[ -n "$seeded_ticket_id" ]]; then
-    RUN_1400_ID_INITIAL="${RUN_1400_ID}"
-    TICKET_1400_ID_INITIAL="${TICKET_1400_ID}"
-    seeded_missing_fills="true"
-    set_kv "seeded_missing_fills" "true"
-    set_kv "seeded_ticket_id" "${seeded_ticket_id}"
+    seed_target_ticket_id="${seeded_ticket_id}"
+    seed_counts="$(psql_capture "select (select count(*) from ledger_trades_intended where ticket_id='${seed_target_ticket_id}'::uuid)::text || '|' || (select count(*) from ledger_trades_fills where ticket_id='${seed_target_ticket_id}'::uuid)::text;")"
+    seed_db_before_intended="${seed_counts%%|*}"
+    seed_db_before_fills="${seed_counts##*|}"
+    seed_db_after_intended="${seed_db_before_intended}"
+    seed_db_after_fills="${seed_db_before_fills}"
 
-    FILLS_SEED_PATH="${OUT_DIR}/inputs/fills_seed.json"
-    intended_rows="$(psql_capture "select sequence::text || '|' || internal_symbol || '|' || side || '|' || coalesce(units::text,'') || '|' || coalesce(notional_value_base::text,'') || '|' || coalesce(limit_price::text, reference_price::text,'') from ledger_trades_intended where ticket_id = '${seeded_ticket_id}' order by sequence;")"
-    [[ -n "$intended_rows" ]] || die "seed-missing-fills: no ledger_trades_intended rows found for ticket_id=${seeded_ticket_id}"
-    INTENDED_ROWS="$intended_rows" python3 - <<'PY' "${FILLS_SEED_PATH}" "${seeded_ticket_id}"
+    if [[ "${seed_db_before_intended}" != "0" && "${seed_db_before_fills}" == "0" ]]; then
+      RUN_1400_ID_INITIAL="${RUN_1400_ID}"
+      TICKET_1400_ID_INITIAL="${TICKET_1400_ID}"
+
+      fills_seed_json="${OUT_DIR}/inputs/fills_seed.json"
+      FILLS_SEED_PATH="${fills_seed_json}"
+      intended_rows="$(psql_capture "select sequence::text || '|' || internal_symbol || '|' || side || '|' || coalesce(units::text,'') || '|' || coalesce(notional_value_base::text,'') || '|' || coalesce(limit_price::text, reference_price::text,'') from ledger_trades_intended where ticket_id = '${seed_target_ticket_id}' order by sequence;")"
+      [[ -n "$intended_rows" ]] || die "seed-missing-fills: no ledger_trades_intended rows found for ticket_id=${seed_target_ticket_id}"
+      seed_fills_intended_count="${seed_db_before_intended}"
+      INTENDED_ROWS="$intended_rows" python3 - <<'PY' "${FILLS_SEED_PATH}" "${seed_target_ticket_id}"
 import json
 import os
 import sys
@@ -329,30 +374,51 @@ with open(out_path, "w", encoding="utf-8") as f:
   f.write(json.dumps(out, indent=2, sort_keys=True) + "\n")
 PY
 
-    run_capture "seed_missing_fills_confirm" env FILLS_JSON="${FILLS_SEED_PATH}" make confirm-fills -- --ticket-id "${seeded_ticket_id}" --submitted-by "day_simulate" --notes "SEEDED_BY_DAY_SIMULATE"
+      seed_fills_written_count="$(python3 -c "import json; import sys; j=json.load(open('${FILLS_SEED_PATH}', encoding='utf-8')); print(len(j.get('fills') or []))")"
 
-    copy_into "${OUT_DIR}/runs/1400_run_summary.md" "${OUT_DIR}/runs/1400_run_summary_initial.md"
-    copy_into "${OUT_DIR}/runs/1400_trades_intended.json" "${OUT_DIR}/runs/1400_trades_intended_initial.json"
-    copy_into "${OUT_DIR}/tickets/ticket_1400.md" "${OUT_DIR}/tickets/ticket_1400_initial.md"
-    copy_into "${OUT_DIR}/tickets/ticket_1400.json" "${OUT_DIR}/tickets/ticket_1400_initial.json"
-    copy_into "${OUT_DIR}/tickets/material_hash_1400.txt" "${OUT_DIR}/tickets/material_hash_1400_initial.txt"
-    copy_into "${OUT_DIR}/runs/no_trade_1400.json" "${OUT_DIR}/runs/no_trade_1400_initial.json"
+      echo "before intended=${seed_db_before_intended} fills=${seed_db_before_fills}" >"${OUT_DIR}/logs/seed_fills_db_counts.txt"
+      run_capture "seed_missing_fills_confirm" env FILLS_JSON="${FILLS_SEED_PATH}" make confirm-fills -- --ticket-id "${seed_target_ticket_id}" --submitted-by "day_simulate" --notes "SEEDED_BY_DAY_SIMULATE"
+      seed_counts_after="$(psql_capture "select (select count(*) from ledger_trades_intended where ticket_id='${seed_target_ticket_id}'::uuid)::text || '|' || (select count(*) from ledger_trades_fills where ticket_id='${seed_target_ticket_id}'::uuid)::text;")"
+      seed_db_after_intended="${seed_counts_after%%|*}"
+      seed_db_after_fills="${seed_counts_after##*|}"
+      echo "after intended=${seed_db_after_intended} fills=${seed_db_after_fills}" >>"${OUT_DIR}/logs/seed_fills_db_counts.txt"
 
-    RUN_1400_CAPTURE="run_1400_after_seed"
-    run_1400_once "${RUN_1400_CAPTURE}"
-    finalize_1400_vars_and_copy
+      seeded_missing_fills="true"
+      seed_reason="seeded_now"
 
-    set_kv "run_1400_id_initial" "${RUN_1400_ID_INITIAL}"
-    set_kv "ticket_1400_id_initial" "${TICKET_1400_ID_INITIAL}"
-    set_kv "run_1400_id" "${RUN_1400_ID}"
-    set_kv "ticket_1400_id" "${TICKET_1400_ID}"
-    set_kv "material_hash_1400" "${material_hash_1400}"
-    set_kv "ticket_1400_decision_type" "${decision_type}"
+      copy_into "${OUT_DIR}/runs/1400_run_summary.md" "${OUT_DIR}/runs/1400_run_summary_initial.md"
+      copy_into "${OUT_DIR}/runs/1400_trades_intended.json" "${OUT_DIR}/runs/1400_trades_intended_initial.json"
+      copy_into "${OUT_DIR}/tickets/ticket_1400.md" "${OUT_DIR}/tickets/ticket_1400_initial.md"
+      copy_into "${OUT_DIR}/tickets/ticket_1400.json" "${OUT_DIR}/tickets/ticket_1400_initial.json"
+      copy_into "${OUT_DIR}/tickets/material_hash_1400.txt" "${OUT_DIR}/tickets/material_hash_1400_initial.txt"
+      copy_into "${OUT_DIR}/runs/no_trade_1400.json" "${OUT_DIR}/runs/no_trade_1400_initial.json"
 
-    if [[ "$decision_type" != "NO_TRADE" ]]; then
-      rm -f "${OUT_DIR}/runs/no_trade_1400.json"
+      RUN_1400_CAPTURE="run_1400_after_seed"
+      run_1400_once "${RUN_1400_CAPTURE}"
+      finalize_1400_vars_and_copy
+
+      set_kv "run_1400_id_initial" "${RUN_1400_ID_INITIAL}"
+      set_kv "ticket_1400_id_initial" "${TICKET_1400_ID_INITIAL}"
+      set_kv "run_1400_id" "${RUN_1400_ID}"
+      set_kv "ticket_1400_id" "${TICKET_1400_ID}"
+      set_kv "material_hash_1400" "${material_hash_1400}"
+      set_kv "ticket_1400_decision_type" "${decision_type}"
+
+      if [[ "$decision_type" != "NO_TRADE" ]]; then
+        rm -f "${OUT_DIR}/runs/no_trade_1400.json"
+      fi
+    else
+      if [[ "${seed_db_before_fills}" != "0" ]]; then
+        seed_reason="already_had_fills"
+      fi
     fi
   fi
+fi
+
+# If seeding was requested but never wrote db counts (e.g., seed not triggered), still emit a stable proof file when we have a target.
+if [[ "$SEED_MISSING_FILLS" == "true" && -n "$seed_target_ticket_id" && ! -f "${OUT_DIR}/logs/seed_fills_db_counts.txt" ]]; then
+  echo "before intended=${seed_db_before_intended} fills=${seed_db_before_fills}" >"${OUT_DIR}/logs/seed_fills_db_counts.txt"
+  echo "after intended=${seed_db_after_intended} fills=${seed_db_after_fills}" >>"${OUT_DIR}/logs/seed_fills_db_counts.txt"
 fi
 
 # Confirm
@@ -442,6 +508,12 @@ cat >"${OUT_DIR}/README.md" <<EOF
 - dryrun_trades (14:00): \`${DRYRUN_TRADES}\`
 - seed-missing-fills: \`${SEED_MISSING_FILLS}\`
 
+## Baseline DB (global state; affects confirmations gate)
+
+- baseline_db_latest_trade_ticket_id: \`${baseline_db_latest_trade_ticket_id}\`
+- baseline_db_intended_count: \`${baseline_db_intended_count}\`
+- baseline_db_fills_count: \`${baseline_db_fills_count}\`
+
 ## IDs
 
 - run_id (0800): \`${RUN_0800_ID}\`
@@ -466,11 +538,14 @@ cat >"${OUT_DIR}/README.md" <<EOF
   - \`${OUT_DIR}/tickets/ticket_1400.json\`
   - \`${OUT_DIR}/tickets/material_hash_1400.txt\`
 
-## Seeded fills (only when requested + applicable)
+## Seeded fills (confirmations unblock helper)
 
 - seeded_missing_fills: \`${seeded_missing_fills}\`
-- ticket_id_fixed: \`${seeded_ticket_id}\`
-- fills_seed_json: \`${OUT_DIR}/inputs/fills_seed.json\`
+- seed_reason: \`${seed_reason}\`
+- seed_target_ticket_id: \`${seed_target_ticket_id}\`
+- seed_fills_intended_count: \`${seed_fills_intended_count}\`
+- seed_fills_written_count: \`${seed_fills_written_count}\`
+- fills_seed_json: \`${fills_seed_json}\`
 
 ## Confirmation
 
