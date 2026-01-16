@@ -2,15 +2,17 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import csv
+import io
 import subprocess
 import sys
-import urllib.error
-import urllib.request
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+from providers.base import PriceEODRow, canonical_json, decimal_to_str
+from providers.registry import get_provider
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV_FILE = ROOT / "config" / "secrets.env"
@@ -81,19 +83,14 @@ def _psql_exec(script: str) -> None:
     ]
     subprocess.run(cmd, input=script.encode("utf-8"), check=True)
 
-
-@dataclass(frozen=True)
-class UniverseRow:
-    internal_symbol: str
-    stooq_symbol: str
-    instrument_type: str
-
-
-def _load_fetch_universe() -> list[UniverseRow]:
-    rows: list[UniverseRow] = []
+def _load_fetch_universe() -> list[tuple[str, str, str | None]]:
+    """
+    Returns (internal_symbol, stooq_symbol, currency) for enabled symbols and explicit benchmarks.
+    """
+    rows: list[tuple[str, str, str | None]] = []
     raw = _psql_capture(
         """
-        select internal_symbol || '|' || coalesce(stooq_symbol,'') || '|' || lower(coalesce(instrument_type,''))
+        select internal_symbol || '|' || coalesce(stooq_symbol,'') || '|' || lower(coalesce(instrument_type,'')) || '|' || coalesce(currency,'')
         from config_universe
         where
           enabled = true
@@ -106,121 +103,166 @@ def _load_fetch_universe() -> list[UniverseRow]:
     if not raw:
         return rows
     for line in raw.splitlines():
-        internal_symbol, stooq_symbol, instrument_type = line.split("|", 2)
+        internal_symbol, stooq_symbol, instrument_type, currency = line.split("|", 3)
         stooq_symbol = stooq_symbol.strip()
         if not stooq_symbol:
             raise ValueError(f"Missing stooq_symbol for {internal_symbol} in config_universe")
-        rows.append(UniverseRow(internal_symbol=internal_symbol.strip(), stooq_symbol=stooq_symbol, instrument_type=instrument_type))
+        rows.append((internal_symbol.strip(), stooq_symbol, (currency.strip() or None)))
     return rows
 
 
-def _stooq_url(stooq_symbol: str) -> str:
-    # Example: https://stooq.com/q/d/l/?s=aapl.us&i=d
-    return f"https://stooq.com/q/d/l/?s={stooq_symbol}&i=d"
+def _expected_asof_date(today: date) -> date:
+    # Most recent weekday before today (T-1 weekday).
+    d = today - timedelta(days=1)
+    while d.weekday() >= 5:  # Sat/Sun
+        d -= timedelta(days=1)
+    return d
 
 
-def _download(url: str, timeout_s: int) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": "trading-ops/1.0"})
-    with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-        return resp.read()
+def _market_data_dir(env: dict[str, str]) -> Path:
+    return Path(env.get("MARKET_DATA_DIR", "/data/trading-ops/data/market")).resolve()
 
 
-def _raw_dir(env: dict[str, str]) -> Path:
-    return Path(env.get("DATA_RAW_DIR", "/data/trading-ops/data/raw")).resolve()
+def _artifacts_root(env: dict[str, str]) -> Path:
+    return Path(env.get("ARTIFACTS_DIR", "/data/trading-ops/artifacts")).resolve()
 
 
-def _write_raw(env: dict[str, str], internal_symbol: str, provider: str, content: bytes) -> Path:
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    out_dir = _raw_dir(env) / provider / internal_symbol
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{ts}.csv"
-    out_path.write_bytes(content)
-    return out_path
+def _input_hash(provider: str, start_date: date, end_date: date, symbols: list[str]) -> str:
+    hasher = hashlib.sha256()
+    hasher.update(b"market-fetch-v1\n")
+    hasher.update(f"provider={provider}\n".encode("utf-8"))
+    hasher.update(f"start={start_date.isoformat()}\n".encode("utf-8"))
+    hasher.update(f"end={end_date.isoformat()}\n".encode("utf-8"))
+    for s in symbols:
+        hasher.update(f"symbol={s}\n".encode("utf-8"))
+    return hasher.hexdigest()
 
 
-def _parse_stooq_csv(content: bytes) -> list[dict[str, str]]:
-    text = content.decode("utf-8", errors="replace")
-    reader = csv.DictReader(text.splitlines())
-    rows: list[dict[str, str]] = []
-    for r in reader:
-        # Stooq headers: Date,Open,High,Low,Close,Volume
-        if not r.get("Date"):
-            continue
-        rows.append(r)
-    return rows
+def _write_manifest(cache_dir: Path, manifest: dict) -> None:
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / "manifest.json").write_text(canonical_json(manifest) + "\n", encoding="utf-8")
 
 
-def _csv_escape(value: str) -> str:
-    # Minimal CSV escaping for our expected values.
-    if value is None:
-        return ""
-    if any(ch in value for ch in [",", "\"", "\n", "\r"]):
-        return '"' + value.replace('"', '""') + '"'
-    return value
+def _write_prices_csv(cache_dir: Path, rows: list[PriceEODRow]) -> Path:
+    out = cache_dir / "prices_eod.csv"
+    header = [
+        "internal_symbol",
+        "trading_date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "adj_close",
+        "volume",
+        "currency",
+        "source",
+        "quality_flags_json",
+    ]
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator="\n")
+    w.writerow(header)
+    for r in sorted(rows, key=lambda x: (x.internal_symbol, x.trading_date.isoformat(), x.source)):
+        w.writerow(
+            [
+                r.internal_symbol,
+                r.trading_date.isoformat(),
+                decimal_to_str(r.open),
+                decimal_to_str(r.high),
+                decimal_to_str(r.low),
+                decimal_to_str(r.close),
+                decimal_to_str(r.adj_close),
+                (str(r.volume) if r.volume is not None else ""),
+                (r.currency or ""),
+                r.source,
+                canonical_json(r.quality_flags or {}),
+            ]
+        )
+    out.write_text(buf.getvalue(), encoding="utf-8")
+    return out
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Fetch Stooq EOD CSVs and load into Postgres market_prices_eod.")
-    parser.add_argument("--max-rows", type=int, default=400, help="Keep only the last N rows per symbol.")
-    parser.add_argument("--timeout-seconds", type=int, default=20)
+    parser = argparse.ArgumentParser(description="Fetch provider EOD prices and load into Postgres market_prices_eod (with deterministic cache).")
+    parser.add_argument("--provider", default="", help="Market data provider (default: env MARKET_PROVIDER or stooq).")
+    parser.add_argument("--end-date", help="End date (YYYY-MM-DD). Default: T-1 weekday (UTC).")
+    parser.add_argument("--lookback-days", type=int, default=1200, help="Calendar days to fetch before end-date.")
+    parser.add_argument("--mode", default="", choices=["", "online", "offline"], help="Fetch mode (default: env MARKET_FETCH_MODE or online).")
     args = parser.parse_args()
 
     if not ENV_FILE.exists():
         raise FileNotFoundError(f"Missing {ENV_FILE}; create it from config/secrets.env.example")
     env = _read_env_file(ENV_FILE)
 
+    mode = (args.mode or env.get("MARKET_FETCH_MODE", "") or "online").strip().lower()
+    offline = mode == "offline"
+    provider_name = (args.provider or env.get("MARKET_PROVIDER", "") or "stooq").strip().lower()
+    provider = get_provider(provider_name)
+
+    end = date.fromisoformat(args.end_date) if args.end_date else _expected_asof_date(datetime.now(timezone.utc).date())
+    if args.lookback_days < 1:
+        raise ValueError("--lookback-days must be >= 1")
+    start = end - timedelta(days=int(args.lookback_days))
+
     universe = _load_fetch_universe()
     if not universe:
         print("No symbols to fetch (no enabled symbols and no benchmarks).")
         return 0
 
-    all_price_rows: list[list[str]] = []
+    internal_symbols = [u[0] for u in universe]
+    stooq_map = {u[0]: u[1] for u in universe}
+    currency_map = {u[0]: u[2] for u in universe}
 
-    for row in universe:
-        url = _stooq_url(row.stooq_symbol)
-        try:
-            content = _download(url, timeout_s=args.timeout_seconds)
-        except urllib.error.URLError as e:
-            raise RuntimeError(f"Failed to download {url}: {e}") from e
+    cache_day_dir = _market_data_dir(env) / provider.name / end.isoformat()
+    symbols_sorted = sorted(internal_symbols)
+    manifest = {
+        "provider": provider.name,
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+        "symbols": symbols_sorted,
+        "input_hash": _input_hash(provider.name, start, end, symbols_sorted),
+        "mode": ("offline" if offline else "online"),
+    }
+    _write_manifest(cache_day_dir, manifest)
 
-        raw_path = _write_raw(env, row.internal_symbol, "stooq", content)
-        parsed = _parse_stooq_csv(content)
-        if not parsed:
-            raise RuntimeError(f"No rows parsed from Stooq for {row.internal_symbol} ({row.stooq_symbol})")
-
-        keep = parsed[-args.max_rows :] if args.max_rows > 0 else parsed
-        # Stooq daily CSV does not include adj_close. For v1 we set adj_close = close
-        # and mark it clearly; this keeps downstream schema consistent.
-        quality_flags = _csv_escape('{"provider":"stooq","adj_close":"synthetic_close"}')
-        source = "stooq"
-
-        for r in keep:
-            trading_date = _csv_escape(r["Date"])
-            open_ = _csv_escape(r.get("Open", ""))
-            high = _csv_escape(r.get("High", ""))
-            low = _csv_escape(r.get("Low", ""))
-            close = _csv_escape(r.get("Close", ""))
-            adj_close = close  # synthetic adj_close = close (v1)
-            volume = _csv_escape(r.get("Volume", ""))
-            all_price_rows.append(
-                [
-                    _csv_escape(row.internal_symbol),
-                    trading_date,
-                    open_,
-                    high,
-                    low,
-                    close,
-                    adj_close,
-                    volume,
-                    _csv_escape(source),
-                    quality_flags,
-                ]
+    prices = provider.fetch_prices_eod(
+        symbols=symbols_sorted,
+        start_date=start,
+        end_date=end,
+        offline=offline,
+        cache_dir=str(cache_day_dir),
+        symbol_map=stooq_map,
+    )
+    # Attach currency from config_universe where available (provider may override in future).
+    prices_final: list[PriceEODRow] = []
+    for r in prices:
+        prices_final.append(
+            PriceEODRow(
+                internal_symbol=r.internal_symbol,
+                trading_date=r.trading_date,
+                open=r.open,
+                high=r.high,
+                low=r.low,
+                close=r.close,
+                adj_close=r.adj_close,
+                volume=r.volume,
+                currency=(r.currency or currency_map.get(r.internal_symbol)),
+                source=r.source,
+                quality_flags=r.quality_flags,
             )
+        )
 
-        print(f"Fetched {row.internal_symbol} ({row.stooq_symbol}) rows={len(keep)} raw={raw_path}")
+    prices_csv_path = _write_prices_csv(cache_day_dir, prices_final)
+    actions = provider.fetch_corporate_actions(
+        symbols=symbols_sorted,
+        start_date=start,
+        end_date=end,
+        offline=offline,
+        cache_dir=str(cache_day_dir),
+        symbol_map=stooq_map,
+    )
 
     # Build a COPY script. Values are pre-escaped; join as CSV.
-    copy_lines = []
+    copy_lines: list[str] = []
     copy_lines.append(
         """
 BEGIN;
@@ -241,8 +283,24 @@ COPY prices_stage (internal_symbol, trading_date, open, high, low, close, adj_cl
 FROM STDIN WITH (FORMAT csv);
 """.lstrip()
     )
-    for r in all_price_rows:
-        copy_lines.append(",".join(r) + "\n")
+    for r in sorted(prices_final, key=lambda x: (x.internal_symbol, x.trading_date.isoformat(), x.source)):
+        buf = io.StringIO()
+        w = csv.writer(buf, lineterminator="")
+        w.writerow(
+            [
+                r.internal_symbol,
+                r.trading_date.isoformat(),
+                decimal_to_str(r.open),
+                decimal_to_str(r.high),
+                decimal_to_str(r.low),
+                decimal_to_str(r.close),
+                decimal_to_str(r.adj_close),
+                (str(r.volume) if r.volume is not None else ""),
+                r.source,
+                canonical_json(r.quality_flags or {}),
+            ]
+        )
+        copy_lines.append(buf.getvalue() + "\n")
     copy_lines.append(r"\." + "\n")
     copy_lines.append(
         """
@@ -264,7 +322,37 @@ COMMIT;
 """.lstrip()
     )
     _psql_exec("".join(copy_lines))
-    print(f"Loaded rows into market_prices_eod: {len(all_price_rows)}")
+    loaded_rows = len(prices_final)
+
+    # Deterministic report artifact
+    artifacts = _artifacts_root(env)
+    report_dir = artifacts / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    report_path = report_dir / f"market_fetch_{provider.name}_{end.isoformat()}_{ts}.md"
+    report_lines: list[str] = []
+    report_lines.append("# Market Fetch Report")
+    report_lines.append("")
+    report_lines.append(f"- Generated at (UTC): `{ts}`")
+    report_lines.append(f"- Provider: `{provider.name}`")
+    report_lines.append(f"- Mode: `{'offline' if offline else 'online'}`")
+    report_lines.append(f"- Start date: `{start.isoformat()}`")
+    report_lines.append(f"- End date: `{end.isoformat()}`")
+    report_lines.append(f"- Symbols: `{len(symbols_sorted)}`")
+    report_lines.append(f"- Price rows loaded: `{loaded_rows}`")
+    report_lines.append(f"- Prices cache: `{prices_csv_path}`")
+    report_lines.append(f"- Cache manifest: `{cache_day_dir / 'manifest.json'}`")
+    report_lines.append(f"- Corporate actions: `dividends={len(actions.dividends)} splits={len(actions.splits)}`")
+    report_lines.append("")
+    report_lines.append("## Symbols")
+    report_lines.append("")
+    for s in symbols_sorted:
+        report_lines.append(f"- `{s}`")
+    report_lines.append("")
+    report_path.write_text("\n".join(report_lines), encoding="utf-8")
+
+    print(f"Wrote {report_path}")
+    print(f"Loaded rows into market_prices_eod: {loaded_rows}")
     return 0
 
 
