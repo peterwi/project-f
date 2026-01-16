@@ -475,7 +475,7 @@ Non-negotiables (must remain true always):
   - Artifacts:
     - `/data/trading-ops/artifacts/tickets/<ticket_id>/material_hash.txt`
 
-- [ ] **M12.4.b End-to-end “day simulation” script**
+- [x] **M12.4.b End-to-end “day simulation” script**
   - Objective: One deterministic command to simulate a full day: 08:00 fetch → reconcile → 14:00 ticket → confirm → reconcile report.
   - Commands:
     - `bash scripts/day_simulate.sh --date YYYY-MM-DD --dryrun-trades`

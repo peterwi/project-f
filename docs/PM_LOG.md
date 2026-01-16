@@ -1554,3 +1554,22 @@ This file is append-only. Each agent message appends a new entry so the project 
   - `git log -1 --oneline`
 - Result:
   - Working tree clean.
+
+## 2026-01-16T10:31:11Z
+
+- Milestone: `M12.4` production hardening
+- Item: `M12.4.b` end-to-end day simulation script
+- What changed:
+  - Created: `scripts/day_simulate.sh`
+  - Updated: `docs/CHECKLIST.md`, `docs/PM_LOG.md`, `docs/PM_STATE.md`
+- Commands executed:
+  - `bash scripts/day_simulate.sh --date 2026-01-09 --dryrun-trades`
+- Outputs:
+  - Simulation folder: `/data/trading-ops/artifacts/day_sim/2026-01-09/20260116T103005Z-git5f765a1`
+  - 08:00 run_id: `29884210-2e45-428f-8fa8-dc31e4334da8`
+  - 14:00 run_id: `8cd5c1b1-7377-4d7f-ac3c-f09472ccd3a0`
+  - 14:00 ticket_id: `2850b177-deed-545b-8d26-28d5b64935fa` (decision_type=`NO_TRADE`)
+  - confirmation_uuid: `903434e7-e48f-4b6c-b01e-896b0af015f2`
+  - final reconcile snapshot_id: `e892c9f4-fce5-49eb-b3b0-5ce9976403d1`
+- Result:
+  - PASS: single self-contained simulation folder contains run ids, ticket artifacts, confirmation artifact, and final reconcile report.
