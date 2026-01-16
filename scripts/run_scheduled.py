@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -213,9 +214,9 @@ def main() -> int:
     parser.add_argument("--asof-date", help="Optional override passed to data quality gate (YYYY-MM-DD).")
     parser.add_argument(
         "--scoring",
-        default="stub",
-        choices=["stub"],
-        help="Scoring engine (v1: stub only; qlib integration later).",
+        default=(os.environ.get("SCORING_ENGINE", "").strip() or "momentum"),
+        choices=["stub", "momentum"],
+        help="Scoring engine (default: env SCORING_ENGINE or momentum).",
     )
     args = parser.parse_args()
 
@@ -294,7 +295,8 @@ def main() -> int:
         dq_cmd = ["python3", "scripts/data_quality_gate.py", "--run-id", run_id]
         if args.asof_date:
             dq_cmd += ["--asof-date", args.asof_date]
-        steps.append(_run_cmd("data-quality", dq_cmd, accept_rcs=(0, 2)))
+        dq_step = _run_cmd("data-quality", dq_cmd, accept_rcs=(0, 2))
+        steps.append(dq_step)
 
         steps.append(_run_cmd("ledger-report", ["make", "ledger-report"], accept_rcs=(0,)))
 
@@ -312,10 +314,15 @@ def main() -> int:
                     accept_rcs=(0, 2),
                 )
             )
-            if args.scoring == "stub":
-                steps.append(_run_cmd("score-stub", ["python3", "scripts/stub_signals.py", "--run-id", run_id], accept_rcs=(0,)))
+            if dq_step.outcome != "OK":
+                steps.append(StepResult("scoring", 0, True, "SKIPPED", "SKIPPED (data-quality not OK)\n", "", []))
             else:
-                raise RuntimeError(f"Unsupported scoring engine: {args.scoring}")
+                if args.scoring == "stub":
+                    steps.append(_run_cmd("score-stub", ["python3", "scripts/stub_signals.py", "--run-id", run_id], accept_rcs=(0,)))
+                elif args.scoring == "momentum":
+                    steps.append(_run_cmd("score-momentum", ["python3", "scripts/score_momentum.py", "--run-id", run_id], accept_rcs=(0,)))
+                else:
+                    raise RuntimeError(f"Unsupported scoring engine: {args.scoring}")
 
             # Gate decision (NO_TRADE is expected in v1); treat rc=2 as valid execution outcome.
             steps.append(_run_cmd("riskguard", ["python3", "scripts/riskguard_run.py", "--run-id", run_id], accept_rcs=(0, 2)))

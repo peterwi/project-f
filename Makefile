@@ -35,6 +35,7 @@ help:
 	@echo "  make run-ops          # one-command ops gates run"
 	@echo "  make policy-validate  # validate config/policy.yml"
 	@echo "  make stub-signals     # write stub signals to DB"
+	@echo "  make score-momentum   # write momentum signals to DB"
 	@echo "  make riskguard        # deterministic approve/block"
 	@echo "  make ticket           # render ticket for LAST_RUN_ID (or RUN_ID=...)"
 	@echo "  make confirm          # submit ticket confirmation (defaults LAST_TICKET_ID)"
@@ -249,6 +250,16 @@ policy-validate:
 stub-signals:
 	@chmod +x scripts/stub_signals.py
 	@python3 scripts/stub_signals.py $(filter-out $@,$(MAKECMDGOALS))
+
+.PHONY: score-momentum
+score-momentum:
+	@chmod +x scripts/score_momentum.py
+	@set -euo pipefail; \
+	if [[ -n "$${RUN_ID:-}" ]]; then \
+	  python3 scripts/score_momentum.py --run-id "$$RUN_ID"; \
+	else \
+	  python3 scripts/score_momentum.py; \
+	fi
 
 .PHONY: riskguard
 riskguard:
